@@ -18,6 +18,7 @@ import helper_scripts as hs
 import binascii
 import os
 import sys
+import zlib
 import sample_bins
 import sample_certs
 
@@ -205,8 +206,9 @@ def provision_trustcustom_device(args, init_mfg):
     retval = init_mfg.exec_cmd(args.port, 'provide-cert-def 0', cert_def_str)
     hs.serial.esp_cmd_check_ok(retval, 'program-device-cert-def')
 
-    retval = init_mfg.exec_cmd(args.port, f'program-dev-cert {slot_lock}', device_cert)
-    hs.serial.esp_cmd_check_ok(retval, f'program-dev-cert {slot_lock} ')
+    crc32_value = zlib.crc32(device_cert) & 0xFFFFFFFF  # Ensure 32-bit unsigned value
+    retval = init_mfg.exec_cmd(args.port, f'program-dev-cert {slot_lock} {crc32_value}', device_cert)
+    hs.serial.esp_cmd_check_ok(retval, f'program-dev-cert {slot_lock} {crc32_value}')
     print(retval[1]['Return'])
 
     signer_cert_data = esp_handle_file(args.signer_cert, 'read')
@@ -220,8 +222,9 @@ def provision_trustcustom_device(args, init_mfg):
     retval = init_mfg.exec_cmd(args.port, 'provide-cert-def 1', cert_def_str)
     hs.serial.esp_cmd_check_ok(retval, 'program-signer-cert-def')
 
-    retval = init_mfg.exec_cmd(args.port, f'program-signer-cert {slot_lock}', signer_cert_data)
-    hs.serial.esp_cmd_check_ok(retval, f'program-signer-cert {slot_lock} ')
+    crc32_value = zlib.crc32(signer_cert_data.encode()) & 0xFFFFFFFF  # Ensure 32-bit unsigned value
+    retval = init_mfg.exec_cmd(args.port, f'program-signer-cert {slot_lock} {crc32_value}', signer_cert_data)
+    hs.serial.esp_cmd_check_ok(retval, f'program-signer-cert {slot_lock} {crc32_value}')
 
 
 def esp_handle_file(file_name, operation, data=None):

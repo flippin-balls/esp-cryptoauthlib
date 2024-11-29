@@ -18,6 +18,7 @@ import time
 import subprocess
 import serial
 import sys
+import re
 try:
     import esptool
 except ImportError:  # cheat and use IDF's copy of esptool if available
@@ -44,19 +45,50 @@ class cmd_interpreter:
         self.port.close()
 
     def wait_for_init(self):
+
         print('Wait for init')
+
+        # Ensure the port is open
         if not self.port.isOpen():
             self.port.open()
+
+        # Configuration variables
+        p_timeout = 20  # Timeout for the entire initialization process
+        version_reply_timeout = 4  # Timeout for the version reply
+        expected_version_pattern = re.compile(rb'v\d+\.\d+\.\d+')  # Regex for vX.Y.Z
+
+        # Initialization
         start_time = time.time()
-        p_timeout = 20
-        line = ''
+        version_request_sent = False
+        version_request_start_time = None
+
         while True:
             try:
                 line = self.port.readline()
                 print(line.decode())
-                if b'Initialising Command line: >>' in line:
-                    print('- CLI Initialised')
-                    return True
+
+                if line != b'':
+                    print(line.decode())
+
+                # Check for initialization prompt or ongoing version request
+                if b'Initializing Command line: >>' in line or version_request_sent:
+                    if not version_request_sent:
+                        print('Requesting version')
+                        self.port.write(b'version')
+                        version_request_sent = True
+                        version_request_start_time = time.time()
+
+                    # Check for expected version response
+                    if expected_version_pattern.search(line):
+                        print('Version reply received - CLI Initialized.')
+                        return True
+
+                    # Handle version reply timeout
+                    elif (time.time() - version_request_start_time) > version_reply_timeout:
+                        print('version reply timed out')
+                        version_request_sent = False
+
+                # Handle overall timeout
                 elif (time.time() - start_time) > p_timeout:
                     print('connection timed out')
                     return False
