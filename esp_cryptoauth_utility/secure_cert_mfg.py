@@ -22,7 +22,7 @@ import zlib
 import sample_bins
 import sample_certs
 
-supported_targets = {'esp32', 'esp32s2', 'esp32s3', 'esp32c3', 'esp32c5', 'esp32c6'}
+supported_targets = {'esp32', 'esp32s3', 'esp32c2', 'esp32c3', 'esp32c6', 'esp32p4', 'esp32h2'}
 try:
     import esptool
 except ImportError:  # cheat and use IDF's copy of esptool if available
@@ -42,7 +42,7 @@ SAMPLE_SIGNERKEY_PATH = os.path.join(sample_certs.__path__[0],
 
 def get_binary_stub_path(target_chip):
     stub_path = os.path.join(sample_bins.__path__[0],
-                             f'secure_cert_mfg_{target_chip}.bin')
+                             f'{target_chip}/secure_cert_mfg_{target_chip}.bin')
     return stub_path
 
 

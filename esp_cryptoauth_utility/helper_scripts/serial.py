@@ -53,8 +53,7 @@ class cmd_interpreter:
             self.port.open()
 
         # Configuration variables
-        p_timeout = 20  # Timeout for the entire initialization process
-        version_reply_timeout = 4  # Timeout for the version reply
+        p_timeout = 10  # Timeout for the entire initialization process
         expected_version_pattern = re.compile(rb'v\d+\.\d+\.\d+')  # Regex for vX.Y.Z
 
         # Initialization
@@ -65,8 +64,6 @@ class cmd_interpreter:
         while True:
             try:
                 line = self.port.readline()
-                print(line.decode())
-
                 if line != b'':
                     print(line.decode())
 
@@ -84,9 +81,9 @@ class cmd_interpreter:
                         return True
 
                     # Handle version reply timeout
-                    elif (time.time() - version_request_start_time) > version_reply_timeout:
+                    elif (time.time() - version_request_start_time) > p_timeout:
                         print('version reply timed out')
-                        version_request_sent = False
+                        return False
 
                 # Handle overall timeout
                 elif (time.time() - start_time) > p_timeout:
