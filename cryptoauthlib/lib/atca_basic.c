@@ -28,7 +28,6 @@
 
 #include "atca_basic.h"
 #include "atca_version.h"
-#include "esp_log.h"
 
 #if defined(ATCA_USE_CONSTANT_HOST_NONCE)
 #if defined(_MSC_VER)
@@ -103,15 +102,10 @@ ATCA_STATUS atcab_init_ext(ATCADevice* device, ATCAIfaceCfg *cfg)
     #ifdef ATCA_ATECC608_SUPPORT
             if (ATECC608 == cfg->devtype)
             {
-                ESP_LOGI("ATCA_BASIC", "Init: Device created, device_state=%d before clock_divider read",
-                         (*device)->device_state);
-                ESP_LOGI("ATCA_BASIC", "Init: Attempting to read clock_divider from config zone");
                 if ((status = calib_read_bytes_zone(*device, ATCA_ZONE_CONFIG, 0, ATCA_CHIPMODE_OFFSET, &(*device)->clock_divider, 1)) != ATCA_SUCCESS)
                 {
-                    ESP_LOGE("ATCA_BASIC", "Init: Failed to read clock_divider, status=0x%02x", status);
                     return status;
                 }
-                ESP_LOGI("ATCA_BASIC", "Init: Successfully read clock_divider=0x%02x", (*device)->clock_divider);
                 (*device)->clock_divider &= ATCA_CHIPMODE_CLOCK_DIV_MASK;
             }
     #endif
