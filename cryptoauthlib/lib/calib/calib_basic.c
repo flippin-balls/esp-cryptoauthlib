@@ -27,6 +27,18 @@
  */
 
 #include "cryptoauthlib.h"
+#include "esp_log.h"
+#include "driver/i2c.h"
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+
+// I2C constants for wake pulse
+#define I2C_MASTER_WRITE 0
+#define I2C_MASTER_READ  1
+#define NACK_VAL         0x1
+#define ACK_VAL          0x0
+#define ACK_CHECK_EN     0x1
+
 
 /** \brief basic API methods are all prefixed with atcab_  (CryptoAuthLib Basic)
  *  the fundamental premise of the basic API is it is based on a single interface
@@ -68,29 +80,65 @@ ATCA_STATUS calib_wakeup_i2c(ATCADevice device)
 
             if(atcab_is_ca_device(atcab_get_device_type_ext(device)))
             {
-                //! Drive the SDA pin low for wake up
-                //! Set i2c device addr as 0U to drive SDA low
-                (void)ifacecfg_set_address(iface->mIfaceCFG, 0U, kit_type);
+                // Send wake pulse: START, 0x00(W), STOP (no word address byte!)
+                // Using direct HAL call to avoid the word_address byte that atsend() adds
+                ATCAIfaceCfg *cfg = iface->mIfaceCFG;
+                if (cfg) {
+                    // Use standard wake-by-write-to-0x00 method
+                    i2c_cmd_handle_t wake_cmd = i2c_cmd_link_create();
+                    i2c_master_start(wake_cmd);
+                    i2c_master_write_byte(wake_cmd, 0x00 | I2C_MASTER_WRITE, false);
+                    i2c_master_stop(wake_cmd);
+                    esp_err_t rc = i2c_master_cmd_begin(cfg->atcai2c.bus, wake_cmd, pdMS_TO_TICKS(10));
+                    i2c_cmd_link_delete(wake_cmd);
 
-                //! I2C general call should not interpreted as an addr write
-                second_byte = 1U;
+                    // Wait wake delay (1.5ms minimum per datasheet, using 3ms for margin)
+                    vTaskDelay(pdMS_TO_TICKS(3));
+
+                    // Read wake response
+                    uint8_t wake_resp[4] = {0};
+                    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+                    i2c_master_start(cmd);
+                    i2c_master_write_byte(cmd, (cfg->atcai2c.address << 1) | I2C_MASTER_READ, true);
+                    for (int i = 0; i < 4; i++) {
+                        i2c_master_read_byte(cmd, &wake_resp[i], (i == 3) ? I2C_MASTER_NACK : I2C_MASTER_ACK);
+                    }
+                    i2c_master_stop(cmd);
+                    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, pdMS_TO_TICKS(100));
+                    i2c_cmd_link_delete(cmd);
+
+                    if (rc == ESP_OK) {
+                        wake = wake_resp[0] | (wake_resp[1] << 8) | (wake_resp[2] << 16) | (wake_resp[3] << 24);
+                        // Give device extra time to fully wake before accepting commands
+                        vTaskDelay(pdMS_TO_TICKS(5));
+                    } else {
+                        status = ATCA_COMM_FAIL;
+                    }
+                }
+
+                second_byte = 0U;  // Not used anymore, but set to 0 for safety
+            }
+            else
+            {
+                // For non-CA devices, use the original method
+                ESP_LOGI("CALIB_WAKEUP_I2C", "Non-CA device, using standard wake (second_byte=%u)", second_byte);
+                (void)atsend(iface, second_byte, NULL, 0);
             }
 
-            (void)atsend(iface, second_byte, NULL, 0);
-
-            //! Set the i2c device address
             (void)ifacecfg_set_address(iface->mIfaceCFG, address, kit_type);
-
-            atca_delay_us(atca_iface_get_wake_delay(iface));
 
             rxlen = (uint16_t)sizeof(wake);
             if (ATCA_SUCCESS == status)
             {
-                status = atreceive(iface, address, (uint8_t*)&wake, &rxlen);
+                // For CA devices, we already read wake response above at 60kHz
+                // Just validate we got a successful status
+                // Set rxlen to indicate we got 4 bytes
+                rxlen = 4;
             }
 
             if ((ATCA_SUCCESS == status) && (100000u < ATCA_IFACECFG_I2C_BAUD(iface->mIfaceCFG)))
             {
+                ESP_LOGI("CALIB_WAKEUP_I2C", "Restoring baud to %u", ATCA_IFACECFG_I2C_BAUD(iface->mIfaceCFG));
                 temp = ATCA_IFACECFG_I2C_BAUD(iface->mIfaceCFG);
                 status = atcontrol(iface, (uint8_t)ATCA_HAL_CHANGE_BAUD, &temp, sizeof(temp));
             }
@@ -101,6 +149,11 @@ ATCA_STATUS calib_wakeup_i2c(ATCADevice device)
             }
         } while (0 < retries-- && ATCA_SUCCESS != status);
     }
+
+    if (status != ATCA_SUCCESS) {
+        ESP_LOGE("CALIB_WAKEUP_I2C", "Wake FAILED with status=0x%02x", status);
+    }
+
     return status;
 }
 

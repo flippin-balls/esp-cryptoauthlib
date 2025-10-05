@@ -32,6 +32,7 @@
  */
 
 #include "cryptoauthlib.h"
+#include "esp_log.h"
 
 
 #if defined(ATCA_NO_POLL) && defined(ATCA_ATECC608_SUPPORT) && !defined(ATCA_ATECC608A_SUPPORT)
@@ -506,6 +507,10 @@ ATCA_STATUS calib_execute_command(ATCAPacket* packet, ATCADevice device)
                 if (ATCA_SUCCESS == (status = calib_wakeup(device)))
                 {
                     device->device_state = (uint8_t)ATCA_DEVICE_STATE_ACTIVE;
+                }
+                else
+                {
+                    ESP_LOGE("CALIB_EXEC", "Execute: Wakeup failed with status 0x%02x", status);
                 }
             }
 

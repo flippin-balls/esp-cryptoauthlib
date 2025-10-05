@@ -116,13 +116,19 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
     esp_err_t rc = ESP_FAIL;
     int bus = cfg->atcai2c.bus;
 
+    ESP_LOGI("HAL_I2C", "Init: bus=%d, addr=0x%02X, sda=%d, scl=%d",
+             bus, cfg->atcai2c.address, I2C_SDA_PIN, I2C_SCL_PIN);
+
     if (bus >= 0 && bus < MAX_I2C_BUSES) {
         if (0 == i2c_hal_data[bus].ref_ct) {
+            ESP_LOGI("HAL_I2C", "Init: First init, installing driver");
             i2c_hal_data[bus].ref_ct = 1;
             i2c_hal_data[bus].conf.mode = I2C_MODE_MASTER;
-            i2c_hal_data[bus].conf.sda_pullup_en = GPIO_PULLUP_DISABLE;
-            i2c_hal_data[bus].conf.scl_pullup_en = GPIO_PULLUP_DISABLE;
-            i2c_hal_data[bus].conf.master.clk_speed = 100000; //cfg->atcai2c.baud;
+            // Enable internal pull-ups for I2C (ATECC608A needs pull-ups)
+            i2c_hal_data[bus].conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+            i2c_hal_data[bus].conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+            // Use baud from config - wake sequence requires <= 100kHz
+            i2c_hal_data[bus].conf.master.clk_speed = cfg->atcai2c.baud;
 
             switch (bus) {
             case 0:
@@ -141,7 +147,9 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
 
             rc = i2c_param_config(i2c_hal_data[bus].id, &i2c_hal_data[bus].conf);
             rc = i2c_driver_install(i2c_hal_data[bus].id, I2C_MODE_MASTER, 0, 0, 0);
+            ESP_LOGI("HAL_I2C", "Init: Driver installed, rc=%d", rc);
         } else {
+            ESP_LOGI("HAL_I2C", "Init: Reusing existing driver (ref=%d)", i2c_hal_data[bus].ref_ct);
             i2c_hal_data[bus].ref_ct++;
         }
 
@@ -149,8 +157,10 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
     }
 
     if (ESP_OK == rc) {
+        ESP_LOGI("HAL_I2C", "Init: SUCCESS");
         return ATCA_SUCCESS;
     } else {
+        ESP_LOGE("HAL_I2C", "Init: FAILED rc=%d", rc);
         return ATCA_COMM_FAIL;
     }
 }
@@ -178,6 +188,7 @@ ATCA_STATUS hal_i2c_send(ATCAIface iface, uint8_t word_address, uint8_t *txdata,
     uint8_t device_address = 0xFFu;
 
     if (!cfg) {
+        ESP_LOGE("HAL_I2C", "Send: NULL config");
         return ATCA_BAD_PARAM;
     }
 
@@ -187,23 +198,40 @@ ATCA_STATUS hal_i2c_send(ATCAIface iface, uint8_t word_address, uint8_t *txdata,
     device_address = ATCA_IFACECFG_VALUE(cfg, atcai2c.address);
 #endif
 
+    // Try simple address probe first to verify device is responding
+    // device_address from config is 7-bit, need to shift left and add R/W bit
+    uint8_t write_byte = (device_address << 1) | I2C_MASTER_WRITE;
+    i2c_cmd_handle_t probe_cmd = i2c_cmd_link_create();
+    i2c_master_start(probe_cmd);
+    i2c_master_write_byte(probe_cmd, write_byte, ACK_CHECK_EN);
+    i2c_master_stop(probe_cmd);
+    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, probe_cmd, 100);
+    i2c_cmd_link_delete(probe_cmd);
+
+    if (ESP_OK != rc) {
+        ESP_LOGE("HAL_I2C", "Send: Device not responding at address 0x%02X (esp_err=%d)", device_address, rc);
+        return ATCA_COMM_FAIL;
+    }
+
+    // Device responded, now send the actual command
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     (void)i2c_master_start(cmd);
-    (void)i2c_master_write_byte(cmd, device_address | I2C_MASTER_WRITE, ACK_CHECK_EN);
+    (void)i2c_master_write_byte(cmd, write_byte, ACK_CHECK_EN);  // Use shifted address
     (void)i2c_master_write_byte(cmd, word_address, ACK_CHECK_EN);
 
     if (NULL != txdata && 0u < txlength) {
         (void)i2c_master_write(cmd, txdata, txlength, ACK_CHECK_EN);
     }
     (void)i2c_master_stop(cmd);
-    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 10);
+
+    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 100);  // Increased from 10 to 100 ticks
     (void)i2c_cmd_link_delete(cmd);
 
     if (ESP_OK != rc) {
+        ESP_LOGE("HAL_I2C", "Send: I2C transaction failed (esp_err=%d)", rc);
         return ATCA_COMM_FAIL;
-    } else {
-        return ATCA_SUCCESS;
     }
+    return ATCA_SUCCESS;
 }
 
 /** \brief HAL implementation of I2C receive function
@@ -222,25 +250,87 @@ ATCA_STATUS hal_i2c_receive(ATCAIface iface, uint8_t address, uint8_t *rxdata, u
     ATCA_STATUS status = ATCA_COMM_FAIL;
 
     if ((NULL == cfg) || (NULL == rxlength) || (NULL == rxdata)) {
+        ESP_LOGE("HAL_I2C", "Receive: NULL pointer encountered");
         return ATCA_TRACE(ATCA_BAD_PARAM, "NULL pointer encountered");
     }
 
     cmd = i2c_cmd_link_create();
     (void)i2c_master_start(cmd);
-    (void)i2c_master_write_byte(cmd, address | I2C_MASTER_READ, ACK_CHECK_EN);
-    if (*rxlength > 1) {
-        (void)i2c_master_read(cmd, rxdata, *rxlength - 1, ACK_VAL);
+    // address is 7-bit, need to shift and add READ bit
+    uint8_t read_byte = (address << 1) | I2C_MASTER_READ;
+    (void)i2c_master_write_byte(cmd, read_byte, ACK_CHECK_EN);
+
+    // Read all bytes: ACK for all except the last, NACK for the last
+    for (size_t i = 0; i < *rxlength; i++) {
+        bool is_last = (i == *rxlength - 1);
+        (void)i2c_master_read_byte(cmd, rxdata + i, is_last ? NACK_VAL : ACK_VAL);
     }
-    (void)i2c_master_read_byte(cmd, rxdata + (size_t)*rxlength - 1, NACK_VAL);
     (void)i2c_master_stop(cmd);
-    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 10);
+
+    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 1000);  // 10 seconds for clock stretching
     (void)i2c_cmd_link_delete(cmd);
 
     if (ESP_OK == rc) {
         status = ATCA_SUCCESS;
+    } else {
+        ESP_LOGE("HAL_I2C", "Receive: Failed with esp_err=%d", rc);
     }
 
     return status;
+}
+
+/** \brief wake up ATECC device using I2C bus
+ * \param[in] iface  interface to logical device to wakeup
+ * \return ATCA_SUCCESS on success, otherwise an error code.
+ */
+ATCA_STATUS hal_i2c_wake(ATCAIface iface)
+{
+    ATCAIfaceCfg *cfg = iface->mIfaceCFG;
+    esp_err_t rc;
+    uint8_t data[4] = {0};
+
+    if (!cfg) {
+        ESP_LOGE("HAL_I2C", "Wake: NULL config");
+        return ATCA_BAD_PARAM;
+    }
+
+    ESP_LOGI("HAL_I2C", "Wake: Sending wake pulse to 0x00");
+
+    // Send wake pulse to address 0x00
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    (void)i2c_master_start(cmd);
+    (void)i2c_master_write_byte(cmd, 0x00 | I2C_MASTER_WRITE, NACK_VAL);  // Wake address, expect NACK
+    (void)i2c_master_stop(cmd);
+    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 10);
+    (void)i2c_cmd_link_delete(cmd);
+
+    ESP_LOGI("HAL_I2C", "Wake: Pulse sent, rc=%d (ESP_OK=%d)", rc, ESP_OK);
+
+    // Wait 1500 microseconds for device to wake
+    ESP_LOGI("HAL_I2C", "Wake: Waiting 1500us");
+    esp_rom_delay_us(1500);
+
+    // Read wake response (should be 0x11)
+    ESP_LOGI("HAL_I2C", "Wake: Reading response from addr 0x%02X", cfg->atcai2c.address);
+    cmd = i2c_cmd_link_create();
+    (void)i2c_master_start(cmd);
+    (void)i2c_master_write_byte(cmd, (cfg->atcai2c.address << 1) | I2C_MASTER_READ, ACK_CHECK_EN);
+    (void)i2c_master_read(cmd, data, 4, NACK_VAL);
+    (void)i2c_master_stop(cmd);
+    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, 10);
+    (void)i2c_cmd_link_delete(cmd);
+
+    ESP_LOGI("HAL_I2C", "Wake: Response rc=%d, data=[0x%02X 0x%02X 0x%02X 0x%02X]",
+             rc, data[0], data[1], data[2], data[3]);
+
+    // Verify wake token (0x11)
+    if (ESP_OK == rc && data[0] == 0x11) {
+        ESP_LOGI("HAL_I2C", "Wake: SUCCESS - got 0x11");
+        return ATCA_SUCCESS;
+    }
+
+    ESP_LOGE("HAL_I2C", "Wake: FAILED - expected 0x11, got 0x%02X (rc=%d)", data[0], rc);
+    return ATCA_COMM_FAIL;
 }
 
 /** \brief manages reference count on given bus and releases resource if no more references exist
