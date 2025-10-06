@@ -58,6 +58,8 @@ static esp_err_t register_provide_cert_def();
 static esp_err_t register_program_device_cert();
 static esp_err_t register_program_signer_cert();
 static esp_err_t register_write_config();
+static esp_err_t register_is_config_locked();
+static esp_err_t register_is_data_locked();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -74,6 +76,8 @@ esp_err_t register_command_handler()
     ret |= register_get_tngtls_signer_cert();
     ret |= register_get_tngtls_device_cert();
     ret |= register_write_config();
+    ret |= register_is_config_locked();
+    ret |= register_is_data_locked();
     return ret;
 }
 
@@ -608,6 +612,92 @@ static esp_err_t register_write_config()
         "  Usage: write-config <CRC32>\n"
         "  Example: write-config 1234567890",
         .func = &write_config,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t is_config_locked(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+    bool is_locked = false;
+
+    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
+        if (argc == 1) {
+            ret = atecc_is_config_locked(&is_locked, &err_code);
+        } else {
+            ESP_LOGE(TAG, "Invalid arguments. Expected usage: is-config-locked");
+        }
+
+        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
+    }
+
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Please initialize device before calling this function");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ESP_LOGE(TAG, "Reason: Invalid Usage");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Checking config lock status failed, returned %d", err_code);
+    } else {
+        printf("\nConfig Zone: %s\n", is_locked ? "LOCKED" : "UNLOCKED");
+    }
+
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_is_config_locked()
+{
+    const esp_console_cmd_t cmd = {
+        .command = "is-config-locked",
+        .help = "Check if ATECC608 config zone is locked\n"
+        "  Returns LOCKED or UNLOCKED status\n"
+        "  Usage: is-config-locked\n"
+        "  Example: is-config-locked",
+        .func = &is_config_locked,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t is_data_locked(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+    bool is_locked = false;
+
+    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
+        if (argc == 1) {
+            ret = atecc_is_data_locked(&is_locked, &err_code);
+        } else {
+            ESP_LOGE(TAG, "Invalid arguments. Expected usage: is-data-locked");
+        }
+
+        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
+    }
+
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Please initialize device before calling this function");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ESP_LOGE(TAG, "Reason: Invalid Usage");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Checking data lock status failed, returned %d", err_code);
+    } else {
+        printf("\nData Zone: %s\n", is_locked ? "LOCKED" : "UNLOCKED");
+    }
+
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_is_data_locked()
+{
+    const esp_console_cmd_t cmd = {
+        .command = "is-data-locked",
+        .help = "Check if ATECC608 data zone is locked\n"
+        "  Returns LOCKED or UNLOCKED status\n"
+        "  Usage: is-data-locked\n"
+        "  Example: is-data-locked",
+        .func = &is_data_locked,
     };
     return esp_console_cmd_register(&cmd);
 }

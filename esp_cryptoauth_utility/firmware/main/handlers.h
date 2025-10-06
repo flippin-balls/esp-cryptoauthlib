@@ -40,6 +40,8 @@ esp_err_t atecc_get_tngtls_root_cert(unsigned char *cert_buf, size_t *cert_len, 
 esp_err_t atecc_get_tngtls_signer_cert(unsigned char *cert_buf, size_t *cert_len, int *err_code);
 esp_err_t atecc_get_tngtls_device_cert(unsigned char *cert_buf, size_t *cert_len, int *err_code);
 esp_err_t atecc_write_config(unsigned char *config_buf, size_t config_len, int *err_code, uint32_t expected_crc);
+esp_err_t atecc_is_config_locked(bool *is_locked, int *err_code);
+esp_err_t atecc_is_data_locked(bool *is_locked, int *err_code);
 
 #ifdef __cplusplus
 }

@@ -43,7 +43,7 @@ write-config <CRC32>
 
 1. **Navigate to firmware directory:**
    ```powershell
-   cd components\esp-cryptoauthlib\esp_cryptoauth_utility\firmware
+   cd ..\esp-cryptoauthlib\esp_cryptoauth_utility\firmware
    ```
 
 2. **Set target chip (if needed):**
