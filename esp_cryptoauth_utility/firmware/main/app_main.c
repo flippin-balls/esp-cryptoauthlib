@@ -113,6 +113,23 @@ static void scli_task(void *arg) {
 
 void app_main()
 {
+    // Suppress verbose I2C error logs (NACKs during ATECC608 wakeup/retry are expected)
+    esp_log_level_set("i2c.master", ESP_LOG_WARN);
+
+    // Display version banner
+    printf("\n");
+    printf("========================================\n");
+    printf("  ATECC608 PROVISIONING FIRMWARE\n");
+    printf("  VERSION: 0.0.2\n");
+    printf("  SAFETY FEATURE: init does NOT auto-lock zones\n");
+    printf("========================================\n");
+    printf("\n");
+    printf("Key changes:\n");
+    printf("- init: Only initializes I2C, does NOT lock zones\n");
+    printf("- lock-config: Manually lock config (after write-config)\n");
+    printf("- lock-data: Manually lock data (after provisioning)\n");
+    printf("\n");
+
     BaseType_t cli_task = xTaskCreate(scli_task, "scli_task", 8 * 1024, NULL, configMAX_PRIORITIES - 5, NULL);
     if (cli_task != pdPASS) {
         ESP_LOGE(TAG, "Couldn't create scli thread");

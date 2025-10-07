@@ -60,6 +60,8 @@ static esp_err_t register_program_signer_cert();
 static esp_err_t register_write_config();
 static esp_err_t register_is_config_locked();
 static esp_err_t register_is_data_locked();
+static esp_err_t register_lock_config_zone();
+static esp_err_t register_lock_data_zone();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -78,6 +80,8 @@ esp_err_t register_command_handler()
     ret |= register_write_config();
     ret |= register_is_config_locked();
     ret |= register_is_data_locked();
+    ret |= register_lock_config_zone();
+    ret |= register_lock_data_zone();
     return ret;
 }
 
@@ -698,6 +702,86 @@ static esp_err_t register_is_data_locked()
         "  Usage: is-data-locked\n"
         "  Example: is-data-locked",
         .func = &is_data_locked,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t lock_config_zone(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+
+    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
+        if (argc == 1) {
+            ret = atecc_lock_config_zone(&err_code);
+        } else {
+            ESP_LOGE(TAG, "Invalid arguments. Expected usage: lock-config");
+        }
+
+        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
+    }
+
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Please initialize device before calling this function");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ESP_LOGE(TAG, "Reason: Invalid Usage");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Locking config zone failed, returned %d", err_code);
+    }
+
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_lock_config_zone()
+{
+    const esp_console_cmd_t cmd = {
+        .command = "lock-config",
+        .help = "Lock ATECC608 config zone (IRREVERSIBLE!)\n"
+        "  Must be called AFTER write-config command\n"
+        "  Usage: lock-config\n"
+        "  Example: lock-config",
+        .func = &lock_config_zone,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t lock_data_zone(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+
+    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
+        if (argc == 1) {
+            ret = atecc_lock_data_zone(&err_code);
+        } else {
+            ESP_LOGE(TAG, "Invalid arguments. Expected usage: lock-data");
+        }
+
+        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
+    }
+
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Please initialize device before calling this function");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ESP_LOGE(TAG, "Reason: Invalid Usage");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Locking data zone failed, returned %d", err_code);
+    }
+
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_lock_data_zone()
+{
+    const esp_console_cmd_t cmd = {
+        .command = "lock-data",
+        .help = "Lock ATECC608 data zone (IRREVERSIBLE!)\n"
+        "  Must be called AFTER provisioning keys/certs\n"
+        "  Usage: lock-data\n"
+        "  Example: lock-data",
+        .func = &lock_data_zone,
     };
     return esp_console_cmd_register(&cmd);
 }

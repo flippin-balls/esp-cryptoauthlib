@@ -155,20 +155,16 @@ esp_err_t init_atecc608a(char *device_type, uint8_t i2c_sda_pin, uint8_t i2c_scl
 
     ECU_DEBUG_LOG(TAG, "\t\t OK");
 
+    // Check lock status but DO NOT auto-lock (user must manually lock after write-config)
     if (ATCA_SUCCESS != (ret = atcab_is_locked(LOCK_ZONE_CONFIG, &is_zone_locked))) {
         ESP_LOGE(TAG, " failed\n  ! atcab_is_locked returned %02x", ret);
         goto exit;
     }
 
     if (!is_zone_locked) {
-        ret = atcab_lock_config_zone();
-        if (ret != ATCA_SUCCESS) {
-            ESP_LOGE(TAG, "error in locking config zone, ret = %02x", ret);
-            goto exit;
-        }
-        ECU_DEBUG_LOG(TAG, "success in locking config zone");
+        ESP_LOGI(TAG, "Config zone is UNLOCKED - ready for write-config command");
     } else {
-        ECU_DEBUG_LOG(TAG, "config zone is Locked ..\tOK");
+        ESP_LOGI(TAG, "Config zone is LOCKED");
     }
 
     is_zone_locked = false;
@@ -179,14 +175,9 @@ esp_err_t init_atecc608a(char *device_type, uint8_t i2c_sda_pin, uint8_t i2c_scl
     }
 
     if (!is_zone_locked) {
-        ret = atcab_lock_data_zone();
-        if (ret != ATCA_SUCCESS) {
-            ESP_LOGE(TAG, "\nerror in locking data zone, ret = %02x", ret);
-            goto exit;
-        }
-        ECU_DEBUG_LOG(TAG, "success in locking data zone");
+        ESP_LOGI(TAG, "Data zone is UNLOCKED - ready for provisioning");
     } else {
-        ECU_DEBUG_LOG(TAG, "data zone is Locked ..\tOK");
+        ESP_LOGI(TAG, "Data zone is LOCKED");
     }
     is_atcab_init = true;
     *err_ret = ret;
@@ -691,6 +682,84 @@ esp_err_t atecc_is_data_locked(bool *is_locked, int *err_ret)
     }
 
     ECU_DEBUG_LOG(TAG, "Data zone lock status: %s", *is_locked ? "LOCKED" : "UNLOCKED");
+    *err_ret = ret;
+    return ESP_OK;
+
+exit:
+    *err_ret = ret;
+    return ESP_FAIL;
+}
+
+esp_err_t atecc_lock_config_zone(int *err_ret)
+{
+    int ret = -1;
+    bool is_locked = false;
+
+    if (!is_atcab_init) {
+        ESP_LOGE(TAG, "Device is not initialized");
+        goto exit;
+    }
+
+    // Check if already locked
+    ret = atcab_is_locked(LOCK_ZONE_CONFIG, &is_locked);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to check config lock status, returned %02x", ret);
+        goto exit;
+    }
+
+    if (is_locked) {
+        ESP_LOGW(TAG, "Config zone is already locked");
+        *err_ret = ret;
+        return ESP_OK;
+    }
+
+    // Lock config zone
+    ret = atcab_lock_config_zone();
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to lock config zone, returned %02x", ret);
+        goto exit;
+    }
+
+    ESP_LOGI(TAG, "Config zone locked successfully");
+    *err_ret = ret;
+    return ESP_OK;
+
+exit:
+    *err_ret = ret;
+    return ESP_FAIL;
+}
+
+esp_err_t atecc_lock_data_zone(int *err_ret)
+{
+    int ret = -1;
+    bool is_locked = false;
+
+    if (!is_atcab_init) {
+        ESP_LOGE(TAG, "Device is not initialized");
+        goto exit;
+    }
+
+    // Check if already locked
+    ret = atcab_is_locked(LOCK_ZONE_DATA, &is_locked);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to check data lock status, returned %02x", ret);
+        goto exit;
+    }
+
+    if (is_locked) {
+        ESP_LOGW(TAG, "Data zone is already locked");
+        *err_ret = ret;
+        return ESP_OK;
+    }
+
+    // Lock data zone
+    ret = atcab_lock_data_zone();
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to lock data zone, returned %02x", ret);
+        goto exit;
+    }
+
+    ESP_LOGI(TAG, "Data zone locked successfully");
     *err_ret = ret;
     return ESP_OK;
 
