@@ -45,6 +45,12 @@
 
 static const char *TAG = "CMD Handler";
 
+// Suppress I2C NACK errors early (before any I2C operations)
+__attribute__((constructor)) static void suppress_i2c_logs(void)
+{
+    esp_log_level_set("i2c.master", ESP_LOG_WARN);
+}
+
 #define ECU_CMD_BUFFER_SIZE 1024
 
 static void scli_loop() {
@@ -113,21 +119,21 @@ static void scli_task(void *arg) {
 
 void app_main()
 {
-    // Suppress verbose I2C error logs (NACKs during ATECC608 wakeup/retry are expected)
-    esp_log_level_set("i2c.master", ESP_LOG_WARN);
-
     // Display version banner
     printf("\n");
     printf("========================================\n");
     printf("  ATECC608 PROVISIONING FIRMWARE\n");
-    printf("  VERSION: 0.0.2\n");
-    printf("  SAFETY FEATURE: init does NOT auto-lock zones\n");
+    printf("  VERSION: 0.0.4\n");
+    printf("  SAFETY: init does NOT auto-lock zones\n");
     printf("========================================\n");
     printf("\n");
-    printf("Key changes:\n");
-    printf("- init: Only initializes I2C, does NOT lock zones\n");
-    printf("- lock-config: Manually lock config (after write-config)\n");
-    printf("- lock-data: Manually lock data (after provisioning)\n");
+    printf("Commands:\n");
+    printf("  init <sda> <scl>  - Initialize I2C (does NOT lock)\n");
+    printf("  write-config <crc>- Write custom config\n");
+    printf("  lock-config       - Lock config zone\n");
+    printf("  lock-data         - Lock data zone\n");
+    printf("  is-config-locked  - Check config lock status\n");
+    printf("  is-data-locked    - Check data lock status\n");
     printf("\n");
 
     BaseType_t cli_task = xTaskCreate(scli_task, "scli_task", 8 * 1024, NULL, configMAX_PRIORITIES - 5, NULL);

@@ -111,39 +111,51 @@ int convert_pem_to_der( const unsigned char *input, size_t ilen,
 extern void hal_esp32_i2c_set_pin_config(uint8_t i2c_sda_pin, uint8_t i2c_scl_pin);
 
 esp_err_t init_atecc608_device(char *device_type)
-{   int ret = 0;
+{
+    int ret = 0;
 
+    // Temporarily suppress I2C errors during chip type detection
+    esp_log_level_t original_level = esp_log_level_get("i2c.master");
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
+
+    // Try TrustCustom (0xC0) - most common for blank chips
     cfg_ateccx08a_i2c_default.atcai2c.address = 0xC0;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
+        esp_log_level_set("i2c.master", original_level);
         ESP_LOGI(TAG, "Device is of type TrustCustom");
         sprintf(device_type, "%s", "TrustCustom");
         return ESP_OK;
     }
 
+    // Try Trust&Go (0x6A)
     cfg_ateccx08a_i2c_default.atcai2c.address = 0x6A;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
-        ESP_LOGI(TAG, "Device is of type TrustnGo");
+        esp_log_level_set("i2c.master", original_level);
+        ESP_LOGI(TAG, "Device is of type Trust&Go");
         sprintf(device_type, "%s", "Trust&Go");
         return ESP_OK;
     }
 
+    // Try TrustFlex (0x6C)
     cfg_ateccx08a_i2c_default.atcai2c.address = 0x6C;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
-        ESP_LOGI(TAG, "Device is of type TrusFlex");
+        esp_log_level_set("i2c.master", original_level);
+        ESP_LOGI(TAG, "Device is of type TrustFlex");
         sprintf(device_type, "%s", "TrustFlex");
         return ESP_OK;
     }
 
+    // Restore log level even if all failed
+    esp_log_level_set("i2c.master", original_level);
     return ESP_FAIL;
 }
 
 esp_err_t init_atecc608a(char *device_type, uint8_t i2c_sda_pin, uint8_t i2c_scl_pin, int *err_ret)
 {
     int ret = 0;
-    bool is_zone_locked = false;
     ECU_DEBUG_LOG(TAG, "Initialize the ATECC interface...");
     hal_esp32_i2c_set_pin_config(i2c_sda_pin,i2c_scl_pin);
     ESP_LOGI(TAG, "I2C pins selected are SDA = %d, SCL = %d", i2c_sda_pin, i2c_scl_pin);
@@ -155,36 +167,9 @@ esp_err_t init_atecc608a(char *device_type, uint8_t i2c_sda_pin, uint8_t i2c_scl
 
     ECU_DEBUG_LOG(TAG, "\t\t OK");
 
-    // Check lock status but DO NOT auto-lock (user must manually lock after write-config)
-    if (ATCA_SUCCESS != (ret = atcab_is_locked(LOCK_ZONE_CONFIG, &is_zone_locked))) {
-        ESP_LOGE(TAG, " failed\n  ! atcab_is_locked returned %02x", ret);
-        goto exit;
-    }
-
-    if (!is_zone_locked) {
-        ESP_LOGI(TAG, "Config zone is UNLOCKED - ready for write-config command");
-    } else {
-        ESP_LOGI(TAG, "Config zone is LOCKED");
-    }
-
-    is_zone_locked = false;
-
-    if (ATCA_SUCCESS != (ret = atcab_is_locked(LOCK_ZONE_DATA, &is_zone_locked))) {
-        ESP_LOGE(TAG, " failed\n  ! atcab_is_locked returned %02x", ret);
-        goto exit;
-    }
-
-    if (!is_zone_locked) {
-        ESP_LOGI(TAG, "Data zone is UNLOCKED - ready for provisioning");
-    } else {
-        ESP_LOGI(TAG, "Data zone is LOCKED");
-    }
     is_atcab_init = true;
     *err_ret = ret;
     return ESP_OK;
-exit:
-    *err_ret = ret;
-    return ESP_FAIL;
 }
 
 esp_err_t atecc_print_info(uint8_t *serial_no, int *err_ret)
