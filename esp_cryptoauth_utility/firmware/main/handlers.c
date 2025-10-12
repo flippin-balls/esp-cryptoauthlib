@@ -560,18 +560,32 @@ esp_err_t atecc_write_config(unsigned char *config_buf, size_t config_len, int *
     }
 
     memset(config_buf, 0xff, config_len);
+
+    // Read exactly ATECC_CONFIG_SIZE bytes of binary data
+    // NOTE: We cannot use null-termination here because binary config data
+    // may contain 0x00 bytes (e.g., at offset 2-5 in typical configs)
     int i = 0;
-    do {
+    while (i < ATECC_CONFIG_SIZE) {
         esp_err_t esp_ret;
         esp_ret = console_interface->read_bytes((uint8_t *)&config_buf[i], 1, portMAX_DELAY);
         if (esp_ret > 0) {
-            if (config_buf[i] == '\0') {
-                break;
-            }
             i++;
+        } else if (esp_ret < 0) {
+            ESP_LOGE(TAG, "Error reading config data at byte %d", i);
+            ret = ATCA_COMM_FAIL;
+            goto exit;
         }
-    } while (i < config_len - 1 && config_buf[i] != '\0');
+        // If esp_ret == 0, just retry (timeout without data)
+    }
 
+    // After reading 128 bytes, consume the null terminator
+    uint8_t null_term;
+    esp_err_t esp_ret = console_interface->read_bytes(&null_term, 1, pdMS_TO_TICKS(100));
+    if (esp_ret > 0 && null_term != '\0') {
+        ESP_LOGW(TAG, "Expected null terminator after config data, got 0x%02x", null_term);
+    }
+
+    ESP_LOGI(TAG, "Read %d bytes of config data", i);
     if (i != ATECC_CONFIG_SIZE) {
         ESP_LOGE(TAG, "Invalid config size: %d bytes (expected %d)", i, ATECC_CONFIG_SIZE);
         ret = ATCA_BAD_PARAM;
@@ -588,31 +602,42 @@ esp_err_t atecc_write_config(unsigned char *config_buf, size_t config_len, int *
 
     ESP_LOGI(TAG, "Writing config to ATECC608...");
 
-    // Write config zone in 4 slots (32 bytes each)
-    // Slot 0: bytes 16-31 (skip read-only bytes 0-15: serial number, revision)
-    // Slot 1: bytes 32-63
-    // Slot 2: bytes 64-95
-    // Slot 3: bytes 96-127
+    // ATECC608 Config Zone Layout (128 bytes total):
+    // Bytes 0-15:   Read-only (serial number, revision) - CANNOT be written
+    // Bytes 16-127: Writable config data (112 bytes)
+    // Byte 84:      NOT writable (reserved for chip modes)
+    //
+    // Following Arduino ECCX08 library pattern:
+    // https://github.com/arduino-libraries/ArduinoECCX08/blob/master/src/ECCX08.cpp#L400
+    //
+    // Write in 4-byte chunks, skipping bytes 0-15 (read-only) and byte 84 (reserved)
 
-    // Note: Bytes 0-15 are read-only (serial number and revision), so we skip them
-    for (uint16_t slot = 0; slot < 4; slot++) {
-        uint16_t offset = (slot == 0) ? 16 : (slot * 32);
-        uint16_t write_size = (slot == 0) ? 16 : 32;
+    for (int i = 16; i < 128; i += 4) {
+        // Skip byte 84 - it's not writable (reserved/chip modes)
+        if (i == 84) {
+            ESP_LOGI(TAG, "Skipping bytes 84-87 (not writable)");
+            continue;
+        }
 
-        ret = calib_write_bytes_zone(atcab_get_device(), ATCA_ZONE_CONFIG, slot, 0,
-                                     &config_buf[offset], write_size);
+        // Write 4 bytes at a time using atcab_write_bytes_zone
+        // Zone: ATCA_ZONE_CONFIG (0)
+        // Slot: 0 (config zone doesn't use slot concept, but pass 0)
+        // Offset: byte address
+        // Data: 4 bytes from config_buf
+        ret = atcab_write_bytes_zone(ATCA_ZONE_CONFIG, 0, i, &config_buf[i], 4);
         if (ret != ATCA_SUCCESS) {
-            ESP_LOGE(TAG, "Failed to write config slot %d, returned %02x", slot, ret);
+            ESP_LOGE(TAG, "Failed to write config bytes %d-%d, returned %02x", i, i+3, ret);
             goto exit;
         }
-        ECU_DEBUG_LOG(TAG, "Config slot %d written successfully", slot);
+
+        ECU_DEBUG_LOG(TAG, "Config bytes %d-%d written successfully", i, i+3);
     }
 
     ESP_LOGI(TAG, "Config zone written successfully");
     *err_ret = ret;
     return ESP_OK;
 
-exit:
+    exit:
     *err_ret = ret;
     return ESP_FAIL;
 }
@@ -745,6 +770,96 @@ esp_err_t atecc_lock_data_zone(int *err_ret)
     }
 
     ESP_LOGI(TAG, "Data zone locked successfully");
+    *err_ret = ret;
+    return ESP_OK;
+
+exit:
+    *err_ret = ret;
+    return ESP_FAIL;
+}
+
+esp_err_t atecc_read_config(unsigned char *config_buf, size_t config_len, int *err_ret)
+{
+    int ret = -1;
+
+    if (!is_atcab_init) {
+        ESP_LOGE(TAG, "Device is not initialized");
+        goto exit;
+    }
+
+    if (config_buf == NULL || config_len < ATECC_CONFIG_SIZE) {
+        ESP_LOGE(TAG, "Invalid buffer");
+        ret = ATCA_BAD_PARAM;
+        goto exit;
+    }
+
+    // Read the entire config zone (128 bytes)
+    ret = atcab_read_config_zone(config_buf);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to read config zone, returned %02x", ret);
+        goto exit;
+    }
+
+    ESP_LOGI(TAG, "Config zone read successfully");
+    *err_ret = ret;
+    return ESP_OK;
+
+    exit:
+    *err_ret = ret;
+    return ESP_FAIL;
+}
+
+esp_err_t atecc_write_data(int slot, unsigned char *data_buf, size_t data_len, int *err_ret)
+{
+    int ret = -1;
+    bool is_data_locked = false;
+
+    if (!is_atcab_init) {
+        ESP_LOGE(TAG, "Device is not initialized");
+        goto exit;
+    }
+
+    if (data_buf == NULL) {
+        ESP_LOGE(TAG, "Invalid data buffer");
+        ret = ATCA_BAD_PARAM;
+        goto exit;
+    }
+
+    if (slot < 0 || slot > 15) {
+        ESP_LOGE(TAG, "Invalid slot number %d (must be 0-15)", slot);
+        ret = ATCA_BAD_PARAM;
+        goto exit;
+    }
+
+    // Data must be 32 bytes for ATECC608
+    if (data_len != 32) {
+        ESP_LOGE(TAG, "Data length must be 32 bytes, got %d", data_len);
+        ret = ATCA_BAD_PARAM;
+        goto exit;
+    }
+
+    // Check if data zone is locked
+    ret = atcab_is_locked(LOCK_ZONE_DATA, &is_data_locked);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to check data lock status, returned %02x", ret);
+        goto exit;
+    }
+
+    if (is_data_locked) {
+        ESP_LOGW(TAG, "Data zone is locked - write may fail if slot requires encryption");
+    }
+
+    // Write data to slot (block 0)
+    // For slots configured with EncRead/WriteConfig protection, this will fail
+    // if data zone is locked. Those slots must be written with atcab_write_enc_bytes()
+    ret = atcab_write_bytes_zone(ATCA_ZONE_DATA, slot, 0, data_buf, data_len);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to write data to slot %d, returned %02x", slot, ret);
+        ESP_LOGE(TAG, "Hint: If slot requires write protection, data zone must be unlocked");
+        goto exit;
+    }
+
+    ESP_LOGI(TAG, "Successfully wrote %d bytes to slot %d", data_len, slot);
     *err_ret = ret;
     return ESP_OK;
 

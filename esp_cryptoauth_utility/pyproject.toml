@@ -1,0 +1,75 @@
+[tool.poetry]
+name = "flashback-device-config-management"
+version = "0.0.1"
+description = "flashback-device-config-management"
+authors = ["Alex Persinger <apersinger@flashbackfleet.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+paho-mqtt = "*"
+doppler-env = "*"
+redis = "*"
+ntplib = "*"
+certifi = "^2025.8.3"
+smallstep-python = "*"
+cryptography = "*"
+boto3 = "*"
+requests = "*"
+esptool = "*"
+pyasn1_modules = "*"
+pyasn1 = "*"
+python-jose = "*"
+pyserial = "*"
+
+[tool.poetry.group.dev.dependencies]
+black = "~24.4"
+isort = "~5.13"
+ipdb = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 150
+exclude = ".*.sql|.*.md|.*.pyc|.*.yaml|.*.yml|.*.json|registration|do-not-commit|venv"
+
+# https://pycqa.github.io/isort/docs/configuration/options.html
+[tool.isort]
+profile = "black"
+float_to_top = true
+skip = [
+    ".gitignore",
+    ".dockerignore",
+    ".venv"
+]
+skip_glob = [
+    "**/.venv/**",
+    "**/registration/**"
+]
+extend_skip = [".venv"]
+
+# https://mypy.readthedocs.io/en/stable/config_file.html#confval-exclude
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+files = []
+exclude = [
+'venv',
+'.venv',
+]
+disable_error_code = ["index", "import", "assignment",]
+
+[tool.vulture]
+min_confidence = 80
+sort_by_size = true
+exclude = []
+
+[tool.pydocstyle]
+convention = "numpy"
+add-ignore = "D100,D104"
+match = "^(?!.*stream).*.py$"

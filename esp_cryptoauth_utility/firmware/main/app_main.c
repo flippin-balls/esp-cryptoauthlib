@@ -40,6 +40,7 @@
 #include <freertos/queue.h>
 
 #include "commands.h"
+#include "version.h"
 
 #include "ecu_console_interface.h"
 
@@ -123,13 +124,14 @@ void app_main()
     printf("\n");
     printf("========================================\n");
     printf("  ATECC608 PROVISIONING FIRMWARE\n");
-    printf("  VERSION: 0.0.4\n");
+    printf("  VERSION: %s\n", FIRMWARE_VERSION);
     printf("  SAFETY: init does NOT auto-lock zones\n");
     printf("========================================\n");
     printf("\n");
     printf("Commands:\n");
     printf("  init <sda> <scl>  - Initialize I2C (does NOT lock)\n");
     printf("  write-config <crc>- Write custom config\n");
+    printf("  write-data <slot> - Write 32 bytes to slot\n");
     printf("  lock-config       - Lock config zone\n");
     printf("  lock-data         - Lock data zone\n");
     printf("  is-config-locked  - Check config lock status\n");
