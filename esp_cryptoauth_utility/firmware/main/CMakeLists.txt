@@ -24,3 +24,13 @@ configure_file(
 
 # Add the build directory to include path so version.h can be found
 target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+# Force rebuild when version.h changes by adding it as a dependency
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/version_force_rebuild.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/version_force_rebuild.stamp
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/version.h
+    COMMENT "Triggering rebuild due to version change"
+)
+add_custom_target(version_rebuild DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/version_force_rebuild.stamp)
+add_dependencies(${COMPONENT_LIB} version_rebuild)

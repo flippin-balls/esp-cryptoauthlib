@@ -117,6 +117,16 @@ def run_command(cmd, description, cwd=None, use_idf_env=False, env_vars=None):
 def build_firmware(version):
     """Build the firmware using idf.py with version injection"""
     env_vars = {"FIRMWARE_VERSION": version}
+
+    # Reconfigure to regenerate version.h with new FIRMWARE_VERSION
+    run_command(
+        "idf.py reconfigure",
+        f"Reconfiguring CMake with version {version}",
+        use_idf_env=True,
+        env_vars=env_vars
+    )
+
+    # Build with the updated configuration
     run_command(
         "idf.py build",
         f"Step 1/5: Building firmware with ESP-IDF (version {version})",

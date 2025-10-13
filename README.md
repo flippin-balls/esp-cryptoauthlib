@@ -30,3 +30,18 @@ There are two ways to use `esp-cryptoauthlib` in your project
 ## How to configure and provision ATECC608
 The python utilty `esp_cryptoauth_utility` helps to configure, generate resources as well as provision ATECC608A chip connected to an ESP module.
 For detailed instructions on how to use the utility please refer utility [README.md](https://github.com/espressif/esp-cryptoauthlib/blob/master/esp_cryptoauth_utility/README.md)
+
+# Create a release
+
+Make sure you install the windows or OS specific esp-idf 5.5 package first.
+
+Then, find the shortcut location that opens up powershell with the environment built.
+
+Open the properties and look for an ID like thing in a string.
+
+Replace: IDF_ID = "esp-idf-29323a3f5a0574597d6dbaa0af20c775"
+with whatever you see in the properties.
+
+```bash
+doppler run -- poetry run python release.py X.Y.Z
+```

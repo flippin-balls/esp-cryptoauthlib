@@ -65,6 +65,7 @@ static esp_err_t register_is_data_locked();
 static esp_err_t register_lock_config_zone();
 static esp_err_t register_lock_data_zone();
 static esp_err_t register_write_data();
+static esp_err_t register_force_build();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -87,6 +88,7 @@ esp_err_t register_command_handler()
     ret |= register_lock_config_zone();
     ret |= register_lock_data_zone();
     ret |= register_write_data();
+    ret |= register_force_build();
     return ret;
 }
 
@@ -995,6 +997,16 @@ static esp_err_t register_write_data()
                     "  Example: write-data 6\n"
                     "  Note: Follow command with 32 bytes of data",
             .func = &write_data,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t register_force_build()
+{
+    const esp_console_cmd_t cmd = {
+            .command = "forcing-build-do-not-use",
+            .help = "This does nothing",
+            .func = &is_data_locked,
     };
     return esp_console_cmd_register(&cmd);
 }

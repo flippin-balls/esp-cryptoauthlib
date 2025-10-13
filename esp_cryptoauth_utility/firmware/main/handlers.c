@@ -282,6 +282,21 @@ esp_err_t atecc_csr_gen(unsigned char *csr_buf, size_t csr_buf_len, int *err_ret
     }
     bzero(csr_buf, csr_buf_len);
     ECU_DEBUG_LOG(TAG, "generating csr ..");
+
+    // Debug: Print cert_def configuration
+    ESP_LOGI(TAG, "CSR cert_def config:");
+    ESP_LOGI(TAG, "  private_key_slot: %d", g_csr_def_3_device.private_key_slot);
+    ESP_LOGI(TAG, "  tbs_cert_loc: offset=%d, count=%d",
+             g_csr_def_3_device.tbs_cert_loc.offset,
+             g_csr_def_3_device.tbs_cert_loc.count);
+    ESP_LOGI(TAG, "  public_key (cert): offset=%d, count=%d",
+             g_csr_def_3_device.std_cert_elements[0].offset,
+             g_csr_def_3_device.std_cert_elements[0].count);
+    ESP_LOGI(TAG, "  signature (cert): offset=%d, count=%d",
+             g_csr_def_3_device.std_cert_elements[1].offset,
+             g_csr_def_3_device.std_cert_elements[1].count);
+    ESP_LOGI(TAG, "  template_size: %d", g_csr_def_3_device.cert_template_size);
+
     ret = atcacert_create_csr_pem(&g_csr_def_3_device, (char *)csr_buf, &csr_buf_len);
     if (ret != ATCA_SUCCESS) {
         ESP_LOGE(TAG, "create csr pem failed, returned %02x", ret);
@@ -757,7 +772,7 @@ esp_err_t atecc_lock_data_zone(int *err_ret)
     }
 
     if (is_locked) {
-        ESP_LOGW(TAG, "Data zone is already locked");
+        ESP_LOGW(TAG, "Data zone is already locked - [forcing build]");
         *err_ret = ret;
         return ESP_OK;
     }
