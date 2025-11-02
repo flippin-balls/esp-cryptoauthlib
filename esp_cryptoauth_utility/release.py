@@ -33,7 +33,7 @@ import argparse
 AWS_ACCESS_KEY = os.environ.get("AWS_PINBALL_DEV_ACCESS_KEY")
 AWS_SECRET_KEY = os.environ.get("AWS_PINBALL_DEV_SECRET_KEY")
 S3_BUCKET = os.environ.get("S3_BUCKET")
-S3_PREFIX = os.environ.get("FIRMWARE_ATECC_PROVISION_BIN_S3_KEY")
+S3_PREFIX = os.environ.get("FIRMWARE_ATECC_PROVISION_BIN_S3_PREFIX")
 LOCAL_COPY_PATH = Path(r"C:\PyCharmProjects\pinball\device-config-management\src\sample_bins\esp32")
 
 # ESP-IDF configuration
