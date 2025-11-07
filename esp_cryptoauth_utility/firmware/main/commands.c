@@ -1009,7 +1009,7 @@ static esp_err_t write_enc_data(int argc, char **argv)
     int err_code;
     uint8_t data_buf[32];
     uint8_t enckey_buf[32];
-    uint8_t num_in[ATCA_NONCE_NUMIN_SIZE] = {0}; // 20 bytes for nonce input
+    uint8_t num_in[NONCE_NUMIN_SIZE] = {0}; // 20 bytes for nonce input
     int target_slot, block, enckey_slot;
     bool use_nonce = false;
 
@@ -1053,10 +1053,10 @@ static esp_err_t write_enc_data(int argc, char **argv)
 
             // Optionally read nonce input
             if (use_nonce) {
-                printf("Reading %d bytes of nonce input...\n", ATCA_NONCE_NUMIN_SIZE);
+                printf("Reading %d bytes of nonce input...\n", NONCE_NUMIN_SIZE);
                 fflush(stdout);
 
-                for (int i = 0; i < ATCA_NONCE_NUMIN_SIZE; i++) {
+                for (int i = 0; i < NONCE_NUMIN_SIZE; i++) {
                     int read_ret = console_interface->read_bytes(&num_in[i], 1, portMAX_DELAY);
                     if (read_ret <= 0) {
                         ESP_LOGE(TAG, "Failed to read nonce byte %d", i);
