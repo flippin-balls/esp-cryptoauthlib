@@ -46,9 +46,6 @@ esp_err_t atecc_is_data_locked(bool *is_locked, int *err_code);
 esp_err_t atecc_lock_config_zone(int *err_code);
 esp_err_t atecc_lock_data_zone(int *err_code);
 esp_err_t atecc_write_data(int slot, unsigned char *data_buf, size_t data_len, int *err_code);
-esp_err_t atecc_write_enc_data(int target_slot, int block, int enckey_slot,
-                                unsigned char *data_buf, unsigned char *enckey_buf,
-                                unsigned char *num_in, size_t data_len, int *err_ret);
 
 #ifdef __cplusplus
 }
