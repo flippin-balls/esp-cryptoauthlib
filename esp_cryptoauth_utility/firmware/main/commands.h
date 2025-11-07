@@ -36,12 +36,6 @@ typedef enum device_status {
     PROGRAM_CERT_BEGIN,
     PROGRAM_CERT_FAIL,
     PROGRAM_CERT_SUCCESS,
-    TNGTLS_ROOT_CERT_FAIL,
-    TNGTLS_ROOT_CERT_SUCCESS,
-    TNGTLS_SIGNER_CERT_FAIL,
-    TNGTLS_SIGNER_CERT_SUCCESS,
-    TNGTLS_DEVICE_CERT_FAIL,
-    TNGTLS_DEVICE_CERT_SUCCESS,
 } device_status_t;
 
 esp_err_t register_command_handler();

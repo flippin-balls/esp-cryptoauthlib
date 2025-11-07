@@ -480,70 +480,6 @@ exit:
     return ESP_FAIL;
 }
 
-esp_err_t atecc_get_tngtls_root_cert(unsigned char *cert_buf, size_t *cert_len, int *err_ret)
-{
-    int ret;
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_root_cert start");
-    if (ATCA_SUCCESS != (ret = tng_atcacert_root_cert_size(cert_len))) {
-        ESP_LOGE(TAG, "failed to get tng_atcacert_root_cert_size, returned 0x%02x", ret);
-        goto exit;
-    }
-    if (ATCA_SUCCESS != (ret = tng_atcacert_root_cert(cert_buf, cert_len))) {
-        ESP_LOGE(TAG, "failed to read tng_atcacert_root_cert, returned 0x%02x", ret);
-        goto exit;
-    }
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_root_cert end");
-    *err_ret = ret;
-    return ESP_OK;
-
-exit:
-    *err_ret = ret;
-    return ESP_FAIL;
-}
-
-esp_err_t atecc_get_tngtls_signer_cert(unsigned char *cert_buf, size_t *cert_len, int *err_ret)
-{
-    int ret;
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_signer_cert start");
-    if (ATCA_SUCCESS != (ret = tng_atcacert_max_signer_cert_size(cert_len))) {
-        ESP_LOGE(TAG, "failed to get tng_atcacert_signer_cert_size, returned 0x%02x", ret);
-        goto exit;
-    }
-    if (ATCA_SUCCESS != (ret = tng_atcacert_read_signer_cert(cert_buf, cert_len))) {
-        ESP_LOGE(TAG, "failed to read tng_atcacert_signer_cert, returned 0x%02x", ret);
-        goto exit;
-    }
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_signer_cert end");
-    *err_ret = ret;
-    return ESP_OK;
-
-exit:
-    *err_ret = ret;
-    return ESP_FAIL;
-}
-
-esp_err_t atecc_get_tngtls_device_cert(unsigned char *cert_buf, size_t *cert_len, int *err_ret)
-{
-    int ret;
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_signer_cert start");
-    if (ATCA_SUCCESS != (ret = tng_atcacert_max_device_cert_size(cert_len))) {
-        ESP_LOGE(TAG, "Failed to get tng_atcacert_device_cert_size, returned 0x%02x", ret);
-        goto exit;
-    }
-    if (ATCA_SUCCESS != (ret = tng_atcacert_read_device_cert(cert_buf, cert_len, NULL))) {
-        ESP_LOGE(TAG, "failed to read tng_atcacert_device_cert, returned 0x%02x", ret);
-        goto exit;
-    }
-    ECU_DEBUG_LOG(TAG, "atecc_get_tngtls_signer_cert end");
-
-    *err_ret = ret;
-    return ESP_OK;
-
-exit:
-    *err_ret = ret;
-    return ESP_FAIL;
-}
-
 #define ATECC_CONFIG_SIZE 128
 esp_err_t atecc_write_config(unsigned char *config_buf, size_t config_len, int *err_ret, uint32_t expected_crc)
 {
@@ -772,7 +708,7 @@ esp_err_t atecc_lock_data_zone(int *err_ret)
     }
 
     if (is_locked) {
-        ESP_LOGW(TAG, "Data zone is already locked - [forcing build]");
+        ESP_LOGW(TAG, "Data zone is already locked");
         *err_ret = ret;
         return ESP_OK;
     }
@@ -875,6 +811,34 @@ esp_err_t atecc_write_data(int slot, unsigned char *data_buf, size_t data_len, i
     }
 
     ESP_LOGI(TAG, "Successfully wrote %d bytes to slot %d", data_len, slot);
+    *err_ret = ret;
+    return ESP_OK;
+
+exit:
+    *err_ret = ret;
+    return ESP_FAIL;
+}
+
+esp_err_t atecc_write_enc_data(int target_slot, int block, int enckey_slot,
+                                unsigned char *data_buf, unsigned char *enckey_buf,
+                                unsigned char *num_in, size_t data_len, int *err_ret)
+{
+    int ret = ATCA_BAD_PARAM;
+
+    if (!is_atcab_init || !data_buf || !enckey_buf || data_len != 32 ||
+        target_slot > 15 || enckey_slot > 15 || block > 7) {
+        goto exit;
+    }
+
+    ECU_DEBUG_LOG(TAG, "Write enc slot %d blk %d", target_slot, block);
+
+    ret = atcab_write_enc(target_slot, block, data_buf, enckey_buf, enckey_slot, num_in);
+    if (ret != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Write enc failed: %02x", ret);
+        goto exit;
+    }
+
+    ESP_LOGI(TAG, "Write enc slot %d OK", target_slot);
     *err_ret = ret;
     return ESP_OK;
 

@@ -36,9 +36,6 @@ esp_err_t atecc_csr_gen(unsigned char *csr_buf, size_t csr_buf_len, int *err_cod
 esp_err_t get_cert_def(unsigned char *cert_def_array, size_t data_len, cert_type_t cert_type);
 esp_err_t atecc_input_cert(unsigned char *cert_buf, size_t cert_len, cert_type_t cert_type, bool lock, int *err_code, uint32_t expected_crc);
 esp_err_t atecc_gen_pubkey(int key_slot, unsigned char *pubkey_buf, int pub_key_buf_len, int *err_code);
-esp_err_t atecc_get_tngtls_root_cert(unsigned char *cert_buf, size_t *cert_len, int *err_code);
-esp_err_t atecc_get_tngtls_signer_cert(unsigned char *cert_buf, size_t *cert_len, int *err_code);
-esp_err_t atecc_get_tngtls_device_cert(unsigned char *cert_buf, size_t *cert_len, int *err_code);
 esp_err_t atecc_write_config(unsigned char *config_buf, size_t config_len, int *err_code, uint32_t expected_crc);
 esp_err_t atecc_read_config(unsigned char *config_buf, size_t config_len, int *err_ret);
 esp_err_t atecc_is_config_locked(bool *is_locked, int *err_code);
@@ -46,6 +43,9 @@ esp_err_t atecc_is_data_locked(bool *is_locked, int *err_code);
 esp_err_t atecc_lock_config_zone(int *err_code);
 esp_err_t atecc_lock_data_zone(int *err_code);
 esp_err_t atecc_write_data(int slot, unsigned char *data_buf, size_t data_len, int *err_code);
+esp_err_t atecc_write_enc_data(int target_slot, int block, int enckey_slot,
+                                unsigned char *data_buf, unsigned char *enckey_buf,
+                                unsigned char *num_in, size_t data_len, int *err_ret);
 
 #ifdef __cplusplus
 }

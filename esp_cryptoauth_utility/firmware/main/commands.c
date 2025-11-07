@@ -52,9 +52,6 @@ static esp_err_t register_print_chip_info();
 static esp_err_t register_generate_key_pair();
 static esp_err_t register_generate_csr();
 static esp_err_t register_generate_pub_key();
-static esp_err_t register_get_tngtls_root_cert();
-static esp_err_t register_get_tngtls_signer_cert();
-static esp_err_t register_get_tngtls_device_cert();
 static esp_err_t register_provide_cert_def();
 static esp_err_t register_program_device_cert();
 static esp_err_t register_program_signer_cert();
@@ -65,7 +62,7 @@ static esp_err_t register_is_data_locked();
 static esp_err_t register_lock_config_zone();
 static esp_err_t register_lock_data_zone();
 static esp_err_t register_write_data();
-static esp_err_t register_force_build();
+static esp_err_t register_write_enc_data();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -78,9 +75,6 @@ esp_err_t register_command_handler()
     ret |= register_provide_cert_def();
     ret |= register_program_device_cert();
     ret |= register_program_signer_cert();
-    ret |= register_get_tngtls_root_cert();
-    ret |= register_get_tngtls_signer_cert();
-    ret |= register_get_tngtls_device_cert();
     ret |= register_write_config();
     ret |= register_read_config();
     ret |= register_is_config_locked();
@@ -88,7 +82,7 @@ esp_err_t register_command_handler()
     ret |= register_lock_config_zone();
     ret |= register_lock_data_zone();
     ret |= register_write_data();
-    ret |= register_force_build();
+    ret |= register_write_enc_data();
     return ret;
 }
 
@@ -432,137 +426,6 @@ static esp_err_t register_program_signer_cert()
                     "  Usage:program-signer-cert lock\n",
             "  Example: program-signer-cert 0 CRC_VALUE",
             .func = &program_signer_cert,
-    };
-    return esp_console_cmd_register(&cmd);
-}
-
-static esp_err_t get_tngtls_root_cert(int argc, char **argv)
-{
-    esp_err_t ret = ESP_ERR_INVALID_ARG;
-    int err_code;
-    size_t cert_size = CRYPT_BUF_LEN;
-    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
-        if (argc == 1) {
-            ret = atecc_get_tngtls_root_cert(crypt_buf_cert, &cert_size, &err_code);
-        }
-        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
-        atca_cli_status_object = ret ? TNGTLS_ROOT_CERT_FAIL : TNGTLS_ROOT_CERT_SUCCESS;
-    }
-    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
-        ESP_LOGE(TAG, "Please Initialize device before calling this function");
-    } else if (ret == ESP_ERR_INVALID_ARG) {
-        ESP_LOGE(TAG, "Reason: Invalid Usage");
-    } else if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to obtain tngtls_root cert, returned %02x", err_code);
-    } else {
-        printf("\n Root Cert Len:%d\n", cert_size);
-        printf("\nCertificate:\n");
-        for (int count = 0; count < cert_size; count ++) {
-            printf("%02x", crypt_buf_cert[count]);
-        }
-    }
-    fflush(stdout);
-    return ESP_OK;
-}
-
-static esp_err_t register_get_tngtls_root_cert()
-{
-    const esp_console_cmd_t cmd = {
-            .command = "get-tngtls-root-cert",
-            .help = "get tngtls root cert, which already stored on the device"
-                    "  The ATECC608 device type should be TNG ( Trust & G0 )"
-                    "  Usage:get-tngtls-root-cert "
-                    "  Example:\n"
-                    "  get-tngtls-root-cert",
-            .func = &get_tngtls_root_cert,
-    };
-    return esp_console_cmd_register(&cmd);
-}
-
-static esp_err_t get_tngtls_signer_cert(int argc, char **argv)
-{
-    esp_err_t ret = ESP_ERR_INVALID_ARG;
-    int err_code;
-    size_t cert_size = CRYPT_BUF_LEN;
-    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
-        if (argc == 1) {
-            ret = atecc_get_tngtls_signer_cert(crypt_buf_cert, &cert_size, &err_code);
-        }
-        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
-        atca_cli_status_object = ret ? TNGTLS_SIGNER_CERT_FAIL : TNGTLS_SIGNER_CERT_SUCCESS;
-    }
-    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
-        ESP_LOGE(TAG, "Please Initialize device before calling this function");
-    } else if (ret == ESP_ERR_INVALID_ARG) {
-        ESP_LOGE(TAG, "Reason: Invalid Usage");
-    } else if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to obtain tngtls_signer cert, returned %02x", err_code);
-    } else {
-        printf("\n Signer Cert Len:%d\n", cert_size);
-        printf("\nCertificate:\n");
-        for (int count = 0; count < cert_size; count ++) {
-            printf("%02x", crypt_buf_cert[count]);
-        }
-    }
-    fflush(stdout);
-    return ESP_OK;
-}
-
-static esp_err_t register_get_tngtls_signer_cert()
-{
-    const esp_console_cmd_t cmd = {
-            .command = "get-tngtls-signer-cert",
-            .help = "get tngtls signer cert, which already stored on the device"
-                    "  The ATECC608 device type should be TNG ( Trust & GO )"
-                    "  Usage:get-tngtls-signer-cert "
-                    "  Example:\n"
-                    "  get-tngtls-signer-cert",
-            .func = &get_tngtls_signer_cert,
-    };
-    return esp_console_cmd_register(&cmd);
-}
-
-static esp_err_t get_tngtls_device_cert(int argc, char **argv)
-{
-    esp_err_t ret = ESP_ERR_INVALID_ARG;
-    int err_code;
-    size_t cert_size = CRYPT_BUF_LEN;
-    if (atca_cli_status_object >= TNGTLS_SIGNER_CERT_SUCCESS) {
-        if (argc == 1) {
-            ret = atecc_get_tngtls_device_cert(crypt_buf_cert, &cert_size, &err_code);
-        }
-        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
-        atca_cli_status_object = ret ? TNGTLS_DEVICE_CERT_FAIL : TNGTLS_DEVICE_CERT_SUCCESS;
-    }
-    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
-        ESP_LOGE(TAG, "Please Initialize device before calling this function");
-    } else if (atca_cli_status_object < TNGTLS_SIGNER_CERT_SUCCESS) {
-        ESP_LOGE(TAG, "Please execute get-tngtls-signer-cert command as this command requires signer cert");
-    } else if (ret == ESP_ERR_INVALID_ARG) {
-        ESP_LOGE(TAG, "Reason: Invalid Usage");
-    } else if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to obtain tngtls_siger cert, returned %02x", err_code);
-    } else {
-        printf("\n Device Cert Len:%d\n", cert_size);
-        printf("\nCertificate:\n");
-        for (int count = 0; count < cert_size; count ++) {
-            printf("%02x", crypt_buf_cert[count]);
-        }
-    }
-    fflush(stdout);
-    return ESP_OK;
-}
-
-static esp_err_t register_get_tngtls_device_cert()
-{
-    const esp_console_cmd_t cmd = {
-            .command = "get-tngtls-device-cert",
-            .help = "get tngtls device cert, which already stored on the device"
-                    "  The ATECC608 device type should be TNG ( Trust & GO )"
-                    "  Usage:get-tngtls-device-cert "
-                    "  Example:\n"
-                    "  get-tngtls-device-cert",
-            .func = &get_tngtls_device_cert,
     };
     return esp_console_cmd_register(&cmd);
 }
@@ -1001,12 +864,80 @@ static esp_err_t register_write_data()
     return esp_console_cmd_register(&cmd);
 }
 
-static esp_err_t register_force_build()
+static esp_err_t write_enc_data(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+    uint8_t data_buf[32];
+    uint8_t enckey_buf[32];
+    uint8_t num_in[NONCE_NUMIN_SIZE] = {0};
+    ecu_console_interface_t *console_interface;
+    uint8_t null_term;
+
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Init device first");
+        goto end;
+    }
+
+    if (argc < 4 || argc > 5) {
+        ESP_LOGE(TAG, "Usage: write-enc-data <slot> <blk> <enckey_slot> [nonce]");
+        goto end;
+    }
+
+    console_interface = get_console_interface();
+
+    // Read data (32 bytes)
+    printf("Reading data...\n");
+    fflush(stdout);
+    if (console_interface->read_bytes(data_buf, 32, portMAX_DELAY) <= 0) {
+        ESP_LOGE(TAG, "Data read failed");
+        ret = ESP_FAIL;
+        goto end;
+    }
+
+    // Read encryption key (32 bytes)
+    printf("Reading key...\n");
+    fflush(stdout);
+    if (console_interface->read_bytes(enckey_buf, 32, portMAX_DELAY) <= 0) {
+        ESP_LOGE(TAG, "Key read failed");
+        ret = ESP_FAIL;
+        goto end;
+    }
+
+    // Read nonce if requested
+    if (argc == 5 && atoi(argv[4]) == 1) {
+        printf("Reading nonce...\n");
+        fflush(stdout);
+        if (console_interface->read_bytes(num_in, NONCE_NUMIN_SIZE, portMAX_DELAY) <= 0) {
+            ESP_LOGE(TAG, "Nonce read failed");
+            ret = ESP_FAIL;
+            goto end;
+        }
+    }
+
+    console_interface->read_bytes(&null_term, 1, portMAX_DELAY);
+
+    ret = atecc_write_enc_data(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]),
+                                data_buf, enckey_buf,
+                                (argc == 5 && atoi(argv[4]) == 1) ? num_in : NULL,
+                                32, &err_code);
+
+    ESP_LOGI(TAG, "Status: %s\n", ret ? "Fail" : "OK");
+
+end:
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_write_enc_data()
 {
     const esp_console_cmd_t cmd = {
-            .command = "forcing-build-do-not-use",
-            .help = "This does nothing",
-            .func = &is_data_locked,
+            .command = "write-enc-data",
+            .help = "Write encrypted data to slot\n"
+                    "  Usage: write-enc-data <slot> <blk> <enckey_slot> [nonce]\n"
+                    "  Example: write-enc-data 7 0 6 0",
+            .func = &write_enc_data,
     };
     return esp_console_cmd_register(&cmd);
 }
+
