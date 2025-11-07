@@ -65,6 +65,7 @@ static esp_err_t register_is_data_locked();
 static esp_err_t register_lock_config_zone();
 static esp_err_t register_lock_data_zone();
 static esp_err_t register_write_data();
+static esp_err_t register_write_enc_data();
 static esp_err_t register_force_build();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
@@ -88,6 +89,7 @@ esp_err_t register_command_handler()
     ret |= register_lock_config_zone();
     ret |= register_lock_data_zone();
     ret |= register_write_data();
+    ret |= register_write_enc_data();
     ret |= register_force_build();
     return ret;
 }
@@ -997,6 +999,110 @@ static esp_err_t register_write_data()
                     "  Example: write-data 6\n"
                     "  Note: Follow command with 32 bytes of data",
             .func = &write_data,
+    };
+    return esp_console_cmd_register(&cmd);
+}
+
+static esp_err_t write_enc_data(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    int err_code;
+    uint8_t data_buf[32];
+    uint8_t enckey_buf[32];
+    uint8_t num_in[ATCA_NONCE_NUMIN_SIZE] = {0}; // 20 bytes for nonce input
+    int target_slot, block, enckey_slot;
+    bool use_nonce = false;
+
+    if (atca_cli_status_object >= ATECC_INIT_SUCCESS) {
+        // Parse command arguments: write-enc-data <target_slot> <block> <enckey_slot> [use_nonce]
+        if (argc == 4 || argc == 5) {
+            target_slot = atoi(argv[1]);
+            block = atoi(argv[2]);
+            enckey_slot = atoi(argv[3]);
+
+            if (argc == 5) {
+                use_nonce = (atoi(argv[4]) == 1);
+            }
+
+            printf("Reading 32 bytes of data to write...\n");
+            fflush(stdout);
+
+            // Read 32 bytes of data via UART
+            ecu_console_interface_t *console_interface = get_console_interface();
+            for (int i = 0; i < 32; i++) {
+                int read_ret = console_interface->read_bytes(&data_buf[i], 1, portMAX_DELAY);
+                if (read_ret <= 0) {
+                    ESP_LOGE(TAG, "Failed to read data byte %d", i);
+                    ret = ESP_FAIL;
+                    goto end;
+                }
+            }
+
+            printf("Reading 32 bytes of encryption key...\n");
+            fflush(stdout);
+
+            // Read 32 bytes of encryption key via UART
+            for (int i = 0; i < 32; i++) {
+                int read_ret = console_interface->read_bytes(&enckey_buf[i], 1, portMAX_DELAY);
+                if (read_ret <= 0) {
+                    ESP_LOGE(TAG, "Failed to read encryption key byte %d", i);
+                    ret = ESP_FAIL;
+                    goto end;
+                }
+            }
+
+            // Optionally read nonce input
+            if (use_nonce) {
+                printf("Reading %d bytes of nonce input...\n", ATCA_NONCE_NUMIN_SIZE);
+                fflush(stdout);
+
+                for (int i = 0; i < ATCA_NONCE_NUMIN_SIZE; i++) {
+                    int read_ret = console_interface->read_bytes(&num_in[i], 1, portMAX_DELAY);
+                    if (read_ret <= 0) {
+                        ESP_LOGE(TAG, "Failed to read nonce byte %d", i);
+                        ret = ESP_FAIL;
+                        goto end;
+                    }
+                }
+            }
+
+            // Read null terminator
+            uint8_t null_term;
+            console_interface->read_bytes(&null_term, 1, portMAX_DELAY);
+
+            // Call the handler
+            ret = atecc_write_enc_data(target_slot, block, enckey_slot, data_buf, enckey_buf,
+                                       use_nonce ? num_in : NULL, 32, &err_code);
+        } else {
+            ESP_LOGE(TAG, "Invalid arguments. Expected: write-enc-data <target_slot> <block> <enckey_slot> [use_nonce]");
+        }
+
+        ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
+    }
+
+end:
+    if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
+        ESP_LOGE(TAG, "Please initialize device before calling this function");
+    } else if (ret == ESP_ERR_INVALID_ARG) {
+        ESP_LOGE(TAG, "Reason: Invalid Usage");
+    } else if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Writing encrypted data failed, returned %d", err_code);
+    }
+    fflush(stdout);
+    return ESP_OK;
+}
+
+static esp_err_t register_write_enc_data()
+{
+    const esp_console_cmd_t cmd = {
+            .command = "write-enc-data",
+            .help = "Write 32 bytes of encrypted data to a slot\n"
+                    "  Data zone must be LOCKED and slot must support encrypted writes\n"
+                    "  Usage: write-enc-data <target_slot> <block> <enckey_slot> [use_nonce]\n"
+                    "  Example: write-enc-data 7 0 6 0\n"
+                    "  Note: Follow command with 32 bytes of data, then 32 bytes of encryption key\n"
+                    "        If use_nonce=1, also provide 20 bytes of nonce input",
+            .func = &write_enc_data,
     };
     return esp_console_cmd_register(&cmd);
 }
