@@ -46,10 +46,6 @@ static const char *TAG = "secure_element";
 static unsigned char crypt_buf_public_key[CRYPT_BUF_PUB_KEY_LEN];
 static unsigned char crypt_buf_csr[CRYPT_BUF_LEN];
 static unsigned char crypt_buf_cert[CRYPT_BUF_LEN];
-// Slot6 IO protection key (loaded at runtime from S3)
-static uint8_t slot6_secret[32] = {0};
-static bool slot6_secret_loaded = false;
-
 static esp_err_t register_init_device();
 static esp_err_t register_get_version();
 static esp_err_t register_print_chip_info();
@@ -67,7 +63,7 @@ static esp_err_t register_lock_config_zone();
 static esp_err_t register_lock_data_zone();
 static esp_err_t register_write_data();
 static esp_err_t register_write_enc_data();
-static esp_err_t register_load_slot6_secret();
+static esp_err_t register_generate_location_psk();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -87,7 +83,7 @@ esp_err_t register_command_handler()
     ret |= register_lock_config_zone();
     ret |= register_lock_data_zone();
     ret |= register_write_data();
-    ret |= register_load_slot6_secret();
+    ret |= register_generate_location_psk();
     ret |= register_write_enc_data();
     return ret;
 }
@@ -947,50 +943,163 @@ static esp_err_t register_write_enc_data()
     return esp_console_cmd_register(&cmd);
 }
 
-static esp_err_t load_slot6_secret(int argc, char **argv)
+ATCA_STATUS derive_location_psk(const char* location_id, const char* region,
+                                 const uint8_t* serial_number, uint8_t out_psk32[32])
+{
+    if (!location_id || !region || !serial_number || !out_psk32) {
+        ESP_LOGE(TAG, "derive_location_psk: NULL parameter");
+        return ATCA_BAD_PARAM;
+    }
+
+    ESP_LOGI(TAG, "Deriving location PSK with location_id='%s', region='%s'", location_id, region);
+
+    // Build info string: "fbf:loc:region:v1" || location_id
+    char info[128];
+    int written = snprintf(info, sizeof(info), "fbf:%s:%s:v1", location_id, region);
+    if (written < 0 || written >= (int)sizeof(info)) {
+        ESP_LOGE(TAG, "derive_location_psk: info string too long");
+        return ATCA_BAD_PARAM;
+    }
+
+    ESP_LOGI(TAG, "Using serial number as IKM:");
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, serial_number, 9, ESP_LOG_INFO);
+
+    // Derivation: PSK = SHA256(SN || info)
+    // where info = "fbf:location_id:region:v1"
+
+    // Use ATECC608A's SHA256 for the derivation
+    // Build input: SN || info
+    uint8_t ikm[9 + 128];  // SN + info (max)
+    memcpy(ikm, serial_number, 9);
+    size_t info_len = strlen(info);
+    memcpy(ikm + 9, info, info_len);
+    size_t ikm_len = 9 + info_len;
+
+    // Compute SHA256 hash using ATECC608A
+    ATCA_STATUS st = atcab_sha((uint16_t)ikm_len, ikm, out_psk32);
+    if (st != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "derive_location_psk: SHA failed: 0x%08X", st);
+        return st;
+    }
+
+    ESP_LOGI(TAG, "Location PSK derived successfully using SHA256:");
+
+    return ATCA_SUCCESS;
+}
+
+static esp_err_t generate_location_psk(int argc, char **argv)
 {
     esp_err_t ret = ESP_ERR_INVALID_ARG;
 
-    if (argc != 2) {
-        ESP_LOGE(TAG, "Usage: load-slot6-secret <hex_string>");
-        ESP_LOGE(TAG, "  hex_string must be 64 hex characters (32 bytes)");
+    if (argc != 4 && argc != 5) {
+        ESP_LOGE(TAG, "Usage: gen-location-psk <slot6_hex_string> <loc_id_str> <region_str> [serial_number_hex]");
+        ESP_LOGE(TAG, "  slot6_hex_string: 64 hex characters (32 bytes)");
+        ESP_LOGE(TAG, "  serial_number_hex: 18 hex characters (9 bytes, optional - reads from device if not provided)");
         return ESP_ERR_INVALID_ARG;
     }
 
-    const char* hex_str = argv[1];
-    size_t hex_len = strlen(hex_str);
+    // Parse arguments
+    const char* slot6_hex = argv[1];
+    const char* location_id = argv[2];
+    const char* region = argv[3];
+    const char* sn_hex = (argc == 5) ? argv[4] : NULL;
 
-    // Validate length (64 hex chars = 32 bytes)
-    if (hex_len != 64) {
-        ESP_LOGE(TAG, "Invalid hex string length: %zu (expected 64)", hex_len);
-        ESP_LOGE(TAG, "Status: Failure");
-        fflush(stdout);
-        return ESP_ERR_INVALID_SIZE;
+    // Parse slot6 IO protection key from hex string
+    uint8_t io_key6[32];
+    if (strlen(slot6_hex) != 64) {
+        ESP_LOGE(TAG, "Invalid hex string length: %d (expected 64)", strlen(slot6_hex));
+        return ESP_ERR_INVALID_ARG;
     }
 
     // Convert hex string to bytes
     for (int i = 0; i < 32; i++) {
-        char byte_str[3] = { hex_str[i*2], hex_str[i*2+1], '\0' };
-        slot6_secret[i] = (uint8_t)strtol(byte_str, NULL, 16);
+        char byte_str[3] = {slot6_hex[i*2], slot6_hex[i*2+1], '\0'};
+        char* endptr;
+        long val = strtol(byte_str, &endptr, 16);
+
+        if (*endptr != '\0' || val < 0 || val > 255) {
+            ESP_LOGE(TAG, "Invalid hex at position %d", i*2);
+            return ESP_ERR_INVALID_ARG;
+        }
+        io_key6[i] = (uint8_t)val;
     }
 
-    slot6_secret_loaded = true;
+    // Get serial number - either from parameter or read from device
+    uint8_t sn[9];
+    if (sn_hex) {
+        // Parse from hex string
+        if (strlen(sn_hex) != 18) {
+            ESP_LOGE(TAG, "Invalid serial number hex length: %d (expected 18)", strlen(sn_hex));
+            return ESP_ERR_INVALID_ARG;
+        }
 
-    ESP_LOGI(TAG, "Slot6 secret loaded successfully (%zu hex chars -> 32 bytes)", hex_len);
-    ESP_LOGI(TAG, "Status: Success");
-    fflush(stdout);
+        for (int i = 0; i < 9; i++) {
+            char byte_str[3] = {sn_hex[i*2], sn_hex[i*2+1], '\0'};
+            char* endptr;
+            long val = strtol(byte_str, &endptr, 16);
+
+            if (*endptr != '\0' || val < 0 || val > 255) {
+                ESP_LOGE(TAG, "Invalid hex in serial number at position %d", i*2);
+                return ESP_ERR_INVALID_ARG;
+            }
+            sn[i] = (uint8_t)val;
+        }
+        ESP_LOGI(TAG, "Using provided serial number");
+    } else {
+        // Read from device
+        ATCA_STATUS status = atcab_read_serial_number(sn);
+        if (status != ATCA_SUCCESS) {
+            ESP_LOGE(TAG, "Failed to read serial number from device: 0x%08X", status);
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "Using device serial number");
+    }
+
+    ESP_LOGI(TAG, "Using location for PSK derivation: %s (region: %s)", location_id, region);
+
+    uint8_t psk[32];
+    ATCA_STATUS status = derive_location_psk(
+        location_id,
+        region,
+        sn,
+        psk
+    );
+
+    if (status != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to derive location PSK: 0x%08X", status);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Location PSK derived successfully");
+    ESP_LOGI(TAG, "  Location: %s", location_id);
+    ESP_LOGI(TAG, "  Region: %s", region);
+
+    uint8_t num_in[20] = {0};
+    status = atcab_write_enc(/* key_id (slot) */ 7, // never changes
+    /* block      */     0,
+    /* data32     */     psk,
+    /* enckey     */     io_key6, // from arg
+    /* enckey_id  */     6,
+    num_in);
+    if (status != ATCA_SUCCESS) {
+        ESP_LOGE(TAG, "write_enc failed: 0x%08X", status);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "Encrypted write OK");
 
     return ESP_OK;
 }
 
-static esp_err_t register_load_slot6_secret()
+static esp_err_t register_generate_location_psk()
 {
     const esp_console_cmd_t cmd = {
-            .command = "load-slot6-secret",
-            .help = "Load slot6 IO protection key from host (for encrypted writes)\n"
-                    "  Usage: load-slot6-secret <hex_string>\n"
-                    "  Example: load-slot6-secret 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF\n",
-            .func = &load_slot6_secret,
+            .command = "gen-location-psk",
+            .help = "Generate location PSK and write to slot 7 using encrypted write\n"
+                    "  Usage: gen-location-psk <slot6_hex> <location_id> <region> [serial_number_hex]\n"
+                    "  Examples:\n"
+                    "    gen-location-psk 0123...CDEF alex-garage us-west\n"
+                    "    gen-location-psk 0123...CDEF alex-garage us-west 0123456789ABCDEF0123\n",
+            .func = &generate_location_psk,
     };
     return esp_console_cmd_register(&cmd);
 }
