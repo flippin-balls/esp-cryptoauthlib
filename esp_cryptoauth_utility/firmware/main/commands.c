@@ -1085,7 +1085,22 @@ static esp_err_t generate_location_psk(int argc, char **argv)
         ESP_LOGE(TAG, "write_enc failed: 0x%08X", status);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Encrypted write OK");
+ 	ESP_LOGI(TAG, "Status: %s\n", status ? "Failure" : "Success");
+	// Output derivation inputs and result for storage/verification
+    printf("\n=== PSK Derivation Result ===\n");
+    printf("Serial Number: ");
+    for (int i = 0; i < 9; i++) {
+        printf("%02x", sn[i]);
+    }
+    printf("\n");
+    printf("Location: %s\n", location_id);
+    printf("Region: %s\n", region);
+    printf("PSK (K_loc): ");
+    for (int i = 0; i < 32; i++) {
+        printf("%02x", psk[i]);
+    }
+    printf("\n=============================\n");
+    fflush(stdout);
 
     return ESP_OK;
 }
