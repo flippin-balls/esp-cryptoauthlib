@@ -873,60 +873,69 @@ static esp_err_t write_enc_data(int argc, char **argv)
     uint8_t data_buf[32];
     uint8_t enckey_buf[32];
     uint8_t num_in[NONCE_NUMIN_SIZE] = {0};
-    ecu_console_interface_t *console_interface;
-    uint8_t null_term;
 
     if (atca_cli_status_object < ATECC_INIT_SUCCESS) {
         ESP_LOGE(TAG, "Init device first");
-        goto end;
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (argc < 4 || argc > 5) {
-        ESP_LOGE(TAG, "Usage: write-enc-data <slot> <blk> <enckey_slot> [nonce]");
-        goto end;
+    if (argc != 6) {
+        ESP_LOGE(TAG, "Usage: write-enc-data <slot> <blk> <data32_hex> <enckey_hex> <enckey_slot>");
+        ESP_LOGE(TAG, "  data32_hex: 64 hex characters (32 bytes)");
+        ESP_LOGE(TAG, "  enckey_hex: 64 hex characters (32 bytes)");
+        return ESP_ERR_INVALID_ARG;
     }
 
-    console_interface = get_console_interface();
+    // Parse arguments
+    int target_slot = atoi(argv[1]);
+    int block = atoi(argv[2]);
+    const char* data_hex = argv[3];
+    const char* enckey_hex = argv[4];
+    int enckey_slot = atoi(argv[5]);
 
-    // Read data (32 bytes)
-    printf("Reading data...\n");
-    fflush(stdout);
-    if (console_interface->read_bytes(data_buf, 32, portMAX_DELAY) <= 0) {
-        ESP_LOGE(TAG, "Data read failed");
-        ret = ESP_FAIL;
-        goto end;
+    // Parse data from hex string (32 bytes = 64 hex chars)
+    if (strlen(data_hex) != 64) {
+        ESP_LOGE(TAG, "Invalid data hex length: %d (expected 64)", strlen(data_hex));
+        return ESP_ERR_INVALID_ARG;
     }
 
-    // Read encryption key (32 bytes)
-    printf("Reading key...\n");
-    fflush(stdout);
-    if (console_interface->read_bytes(enckey_buf, 32, portMAX_DELAY) <= 0) {
-        ESP_LOGE(TAG, "Key read failed");
-        ret = ESP_FAIL;
-        goto end;
-    }
+    for (int i = 0; i < 32; i++) {
+        char byte_str[3] = {data_hex[i*2], data_hex[i*2+1], '\0'};
+        char* endptr;
+        long val = strtol(byte_str, &endptr, 16);
 
-    // Read nonce if requested
-    if (argc == 5 && atoi(argv[4]) == 1) {
-        printf("Reading nonce...\n");
-        fflush(stdout);
-        if (console_interface->read_bytes(num_in, NONCE_NUMIN_SIZE, portMAX_DELAY) <= 0) {
-            ESP_LOGE(TAG, "Nonce read failed");
-            ret = ESP_FAIL;
-            goto end;
+        if (*endptr != '\0' || val < 0 || val > 255) {
+            ESP_LOGE(TAG, "Invalid hex in data at position %d", i*2);
+            return ESP_ERR_INVALID_ARG;
         }
+        data_buf[i] = (uint8_t)val;
     }
 
-    console_interface->read_bytes(&null_term, 1, portMAX_DELAY);
+    // Parse encryption key from hex string (32 bytes = 64 hex chars)
+    if (strlen(enckey_hex) != 64) {
+        ESP_LOGE(TAG, "Invalid enckey hex length: %d (expected 64)", strlen(enckey_hex));
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    ret = atecc_write_enc_data(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]),
-                                data_buf, enckey_buf,
-                                (argc == 5 && atoi(argv[4]) == 1) ? num_in : NULL,
+    for (int i = 0; i < 32; i++) {
+        char byte_str[3] = {enckey_hex[i*2], enckey_hex[i*2+1], '\0'};
+        char* endptr;
+        long val = strtol(byte_str, &endptr, 16);
+
+        if (*endptr != '\0' || val < 0 || val > 255) {
+            ESP_LOGE(TAG, "Invalid hex in enckey at position %d", i*2);
+            return ESP_ERR_INVALID_ARG;
+        }
+        enckey_buf[i] = (uint8_t)val;
+    }
+
+    ESP_LOGI(TAG, "Writing encrypted data to slot %d, block %d", target_slot, block);
+
+    ret = atecc_write_enc_data(target_slot, block, enckey_slot,
+                                data_buf, enckey_buf, num_in,
                                 32, &err_code);
 
-    ESP_LOGI(TAG, "Status: %s\n", ret ? "Fail" : "OK");
-
-end:
+	ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
     fflush(stdout);
     return ESP_OK;
 }
@@ -936,8 +945,8 @@ static esp_err_t register_write_enc_data()
     const esp_console_cmd_t cmd = {
             .command = "write-enc-data",
             .help = "Write encrypted data to slot\n"
-                    "  Usage: write-enc-data <slot> <blk> <enckey_slot> [nonce]\n"
-                    "  Example: write-enc-data 7 0 6 0",
+                    "  Usage: write-enc-data <slot> <blk> <data32_hex> <enckey_hex> <enckey_slot>\n"
+                    "  Example: write-enc-data 7 0 <64_hex_chars> <64_hex_chars> 6",
             .func = &write_enc_data,
     };
     return esp_console_cmd_register(&cmd);
