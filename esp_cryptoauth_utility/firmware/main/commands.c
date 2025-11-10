@@ -46,6 +46,10 @@ static const char *TAG = "secure_element";
 static unsigned char crypt_buf_public_key[CRYPT_BUF_PUB_KEY_LEN];
 static unsigned char crypt_buf_csr[CRYPT_BUF_LEN];
 static unsigned char crypt_buf_cert[CRYPT_BUF_LEN];
+// Slot6 IO protection key (loaded at runtime from S3)
+static uint8_t slot6_secret[32] = {0};
+static bool slot6_secret_loaded = false;
+
 static esp_err_t register_init_device();
 static esp_err_t register_get_version();
 static esp_err_t register_print_chip_info();
@@ -63,6 +67,7 @@ static esp_err_t register_lock_config_zone();
 static esp_err_t register_lock_data_zone();
 static esp_err_t register_write_data();
 static esp_err_t register_write_enc_data();
+static esp_err_t register_load_slot6_secret();
 static device_status_t atca_cli_status_object;
 esp_err_t register_command_handler()
 {
@@ -82,6 +87,7 @@ esp_err_t register_command_handler()
     ret |= register_lock_config_zone();
     ret |= register_lock_data_zone();
     ret |= register_write_data();
+    ret |= register_load_slot6_secret();
     ret |= register_write_enc_data();
     return ret;
 }
@@ -941,3 +947,50 @@ static esp_err_t register_write_enc_data()
     return esp_console_cmd_register(&cmd);
 }
 
+static esp_err_t load_slot6_secret(int argc, char **argv)
+{
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+
+    if (argc != 2) {
+        ESP_LOGE(TAG, "Usage: load-slot6-secret <hex_string>");
+        ESP_LOGE(TAG, "  hex_string must be 64 hex characters (32 bytes)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const char* hex_str = argv[1];
+    size_t hex_len = strlen(hex_str);
+
+    // Validate length (64 hex chars = 32 bytes)
+    if (hex_len != 64) {
+        ESP_LOGE(TAG, "Invalid hex string length: %zu (expected 64)", hex_len);
+        ESP_LOGE(TAG, "Status: Failure");
+        fflush(stdout);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Convert hex string to bytes
+    for (int i = 0; i < 32; i++) {
+        char byte_str[3] = { hex_str[i*2], hex_str[i*2+1], '\0' };
+        slot6_secret[i] = (uint8_t)strtol(byte_str, NULL, 16);
+    }
+
+    slot6_secret_loaded = true;
+
+    ESP_LOGI(TAG, "Slot6 secret loaded successfully (%zu hex chars -> 32 bytes)", hex_len);
+    ESP_LOGI(TAG, "Status: Success");
+    fflush(stdout);
+
+    return ESP_OK;
+}
+
+static esp_err_t register_load_slot6_secret()
+{
+    const esp_console_cmd_t cmd = {
+            .command = "load-slot6-secret",
+            .help = "Load slot6 IO protection key from host (for encrypted writes)\n"
+                    "  Usage: load-slot6-secret <hex_string>\n"
+                    "  Example: load-slot6-secret 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF\n",
+            .func = &load_slot6_secret,
+    };
+    return esp_console_cmd_register(&cmd);
+}
