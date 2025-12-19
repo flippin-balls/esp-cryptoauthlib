@@ -3,14 +3,16 @@
 Release script for ATECC608 provisioning firmware
 
 This script automates the firmware build, conversion, local copy, and S3 upload process.
+Supports multiple ESP32 targets (esp32, esp32s3).
 
 Usage:
-    doppler run -- poetry run python release.py <version> [--no-s3] [--clean]
+    doppler run -- poetry run python release.py <version> [--target TARGET] [--no-s3] [--clean]
 
 Examples:
-    doppler run -- poetry run python release.py 0.0.6              # Build and upload version 0.0.6
-    doppler run -- poetry run python release.py 0.0.7 --no-s3      # Build locally only, skip S3 upload
-    doppler run -- poetry run python release.py 0.1.0 --clean      # Clean build with version 0.1.0
+    doppler run -- poetry run python release.py 0.0.6                      # Build ESP32 and upload version 0.0.6
+    doppler run -- poetry run python release.py 0.0.7 --target esp32s3     # Build for ESP32-S3
+    doppler run -- poetry run python release.py 0.0.7 --no-s3              # Build locally only, skip S3 upload
+    doppler run -- poetry run python release.py 0.1.0 --clean              # Clean build with version 0.1.0
 
 Environment Variables (injected via Doppler):
     AWS_PINBALL_DEV_ACCESS_KEY         # AWS access key
@@ -34,7 +36,8 @@ AWS_ACCESS_KEY = os.environ.get("AWS_PINBALL_DEV_ACCESS_KEY")
 AWS_SECRET_KEY = os.environ.get("AWS_PINBALL_DEV_SECRET_KEY")
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("FIRMWARE_ATECC_PROVISION_BIN_S3_PREFIX")
-LOCAL_COPY_PATH = Path(r"C:\PyCharmProjects\pinball\device-config-management\src\sample_bins\esp32")
+def get_local_copy_path(target):
+    return Path(rf"C:\PyCharmProjects\pinball\device-config-management\src\sample_bins\{target}")
 
 # ESP-IDF configuration
 IDF_INIT_SCRIPT = Path(r"C:\Espressif\Initialize-Idf.ps1")
@@ -114,9 +117,16 @@ def run_command(cmd, description, cwd=None, use_idf_env=False, env_vars=None):
 
 
 
-def build_firmware(version):
+def build_firmware(version, target):
     """Build the firmware using idf.py with version injection"""
     env_vars = {"FIRMWARE_VERSION": version}
+
+    # Set target chip
+    run_command(
+        f"idf.py set-target {target}",
+        f"Setting target to {target}",
+        use_idf_env=True
+    )
 
     # Reconfigure to regenerate version.h with new FIRMWARE_VERSION
     run_command(
@@ -128,14 +138,22 @@ def build_firmware(version):
 
     # Build with the updated configuration
     run_command(
+        "idf.py fullclean",
+        f"Step 0/5: Cleaning (version {version}, target {target})",
+        use_idf_env=True,
+        env_vars=env_vars
+    )
+
+    # Build with the updated configuration
+    run_command(
         "idf.py build",
-        f"Step 1/5: Building firmware with ESP-IDF (version {version})",
+        f"Step 1/5: Building firmware with ESP-IDF (version {version}, target {target})",
         use_idf_env=True,
         env_vars=env_vars
     )
 
 
-def convert_to_binary():
+def convert_to_binary(target):
     """Convert ELF to binary using esptool"""
     elf_file = BUILD_DIR / "ecu_firmware.elf"
     if not elf_file.exists():
@@ -143,8 +161,8 @@ def convert_to_binary():
         sys.exit(1)
 
     run_command(
-        f'esptool.py --chip esp32 elf2image "{elf_file}"',
-        "Step 2/5: Converting ELF to binary",
+        f'esptool.py --chip {target} elf2image "{elf_file}"',
+        f"Step 2/5: Converting ELF to binary ({target})",
         use_idf_env=True
     )
 
@@ -156,14 +174,16 @@ def convert_to_binary():
     return bin_file
 
 
-def copy_to_local(bin_file):
+def copy_to_local(bin_file, target):
     """Copy binary to local Python project"""
     print_section("Step 3/5: Copying to Python project")
 
-    # Create destination directory if it doesn't exist
-    LOCAL_COPY_PATH.mkdir(parents=True, exist_ok=True)
+    local_copy_path = get_local_copy_path(target)
 
-    dest = LOCAL_COPY_PATH / "secure_cert_mfg_esp32.bin"
+    # Create destination directory if it doesn't exist
+    local_copy_path.mkdir(parents=True, exist_ok=True)
+
+    dest = local_copy_path / f"secure_cert_mfg_{target}.bin"
     shutil.copy2(bin_file, dest)
 
     # Get file size
@@ -172,8 +192,10 @@ def copy_to_local(bin_file):
     print(f"✓ Copied to: {dest}")
     print(f"✓ File size: {size_kb:.1f} KB")
 
+    return dest
 
-def upload_to_s3(bin_file, version):
+
+def upload_to_s3(bin_file, version, target):
     """Upload binary to S3 with versioning"""
     print_section("Step 4/5: Uploading to S3")
 
@@ -214,12 +236,12 @@ def upload_to_s3(bin_file, version):
         metadata = {
             'version': version,
             'build_date': datetime.utcnow().isoformat() + 'Z',
-            'chip': 'esp32',
+            'chip': target,
             'firmware': 'atecc608_provisioning'
         }
 
-        # Upload versioned file
-        versioned_key = f"{S3_PREFIX}/ecu_firmware_v{version}.bin"
+        # Upload versioned file (include target in path)
+        versioned_key = f"{S3_PREFIX}/{target}/ecu_firmware_v{version}.bin"
         print(f"Uploading versioned file: {versioned_key}...")
         s3.upload_file(
             str(bin_file),
@@ -230,7 +252,7 @@ def upload_to_s3(bin_file, version):
         print(f"✓ Uploaded: s3://{S3_BUCKET}/{versioned_key}")
 
         # Update 'latest' pointer
-        latest_key = f"{S3_PREFIX}/ecu_firmware_latest.bin"
+        latest_key = f"{S3_PREFIX}/{target}/ecu_firmware_latest.bin"
         print(f"\nUpdating 'latest' pointer: {latest_key}...")
         s3.upload_file(
             str(bin_file),
@@ -249,7 +271,7 @@ def upload_to_s3(bin_file, version):
         sys.exit(1)
 
 
-def create_release_notes(version, bin_file):
+def create_release_notes(version, bin_file, target, local_dest):
     """Create and display release summary"""
     print_section("Step 5/5: Release Summary")
 
@@ -262,21 +284,21 @@ Release Information:
 Version:      {version}
 Build Date:   {build_time}
 Binary Size:  {size_kb:.1f} KB
-Chip Target:  ESP32
+Chip Target:  {target.upper()}
 
 Local Paths:
 --------------------
 Source:       {bin_file}
-Destination:  {LOCAL_COPY_PATH / 'secure_cert_mfg_esp32.bin'}
+Destination:  {local_dest}
 
 S3 Locations:
 --------------------
-Versioned:    s3://{S3_BUCKET}/{S3_PREFIX}/ecu_firmware_v{version}.bin
-Latest:       s3://{S3_BUCKET}/{S3_PREFIX}/ecu_firmware_latest.bin
+Versioned:    s3://{S3_BUCKET}/{S3_PREFIX}/{target}/ecu_firmware_v{version}.bin
+Latest:       s3://{S3_BUCKET}/{S3_PREFIX}/{target}/ecu_firmware_latest.bin
 
 Download URL (if public):
 --------------------
-https://{S3_BUCKET}.s3.amazonaws.com/{S3_PREFIX}/ecu_firmware_v{version}.bin
+https://{S3_BUCKET}.s3.amazonaws.com/{S3_PREFIX}/{target}/ecu_firmware_v{version}.bin
 """)
 
 
@@ -286,14 +308,21 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  doppler run -- poetry run python release.py 0.0.6              # Build and upload version 0.0.6
-  doppler run -- poetry run python release.py 0.0.7 --no-s3      # Build locally only, skip S3
-  doppler run -- poetry run python release.py 0.1.0 --clean      # Clean build with new version
+  doppler run -- poetry run python release.py 0.0.6                      # Build ESP32 and upload version 0.0.6
+  doppler run -- poetry run python release.py 0.0.7 --target esp32s3     # Build for ESP32-S3
+  doppler run -- poetry run python release.py 0.0.7 --no-s3              # Build locally only, skip S3
+  doppler run -- poetry run python release.py 0.1.0 --clean              # Clean build with new version
         """
     )
     parser.add_argument(
         'version',
         help='Firmware version (e.g., 0.0.6)'
+    )
+    parser.add_argument(
+        '--target',
+        default='esp32',
+        choices=['esp32', 'esp32s3'],
+        help='Target chip (default: esp32)'
     )
     parser.add_argument(
         '--no-s3',
@@ -308,12 +337,13 @@ Examples:
 
     args = parser.parse_args()
 
-    # Get version from argument
+    # Get arguments
     version = args.version
+    target = args.target
 
     print(f"\n{'=' * 70}")
     print(f"  ATECC608 Firmware Release Tool")
-    print(f"  Version: {version}")
+    print(f"  Version: {version}  |  Target: {target.upper()}")
     print(f"{'=' * 70}")
 
     # Validate paths
@@ -327,13 +357,13 @@ Examples:
         run_command("idf.py fullclean", "Running fullclean...", use_idf_env=True)
 
     # Step 1: Build
-    build_firmware(version)
+    build_firmware(version, target)
 
     # Step 2: Convert to binary
-    bin_file = convert_to_binary()
+    bin_file = convert_to_binary(target)
 
     # Step 3: Copy to local project
-    copy_to_local(bin_file)
+    local_dest = copy_to_local(bin_file, target)
 
     # Step 4: Upload to S3 (if not disabled)
     if not args.no_s3:
@@ -341,15 +371,15 @@ Examples:
             print("\n⚠️  WARNING: S3_BUCKET not configured in script")
             print("Skipping S3 upload. Edit release.py to set S3_BUCKET")
         else:
-            upload_to_s3(bin_file, version)
+            upload_to_s3(bin_file, version, target)
     else:
         print_section("Step 4/5: Skipping S3 upload (--no-s3)")
 
     # Step 5: Summary
-    create_release_notes(version, bin_file)
+    create_release_notes(version, bin_file, target, local_dest)
 
     print_section("✓ Release Complete!")
-    print(f"\nFirmware v{version} is ready to use")
+    print(f"\nFirmware v{version} for {target.upper()} is ready to use")
     if not args.no_s3 and S3_BUCKET != "your-bucket-name":
         print("Binary uploaded to S3 and copied to local project")
     else:
