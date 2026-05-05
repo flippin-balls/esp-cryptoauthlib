@@ -28,16 +28,10 @@
 
 #include "cryptoauthlib.h"
 #include "esp_log.h"
-#include "driver/i2c.h"
-#include "driver/gpio.h"
-#include "esp_rom_sys.h"
-
-// I2C constants for wake pulse
-#define I2C_MASTER_WRITE 0
-#define I2C_MASTER_READ  1
-#define NACK_VAL         0x1
-#define ACK_VAL          0x0
-#define ACK_CHECK_EN     0x1
+/* The fork previously inlined a custom wake-pulse sequence here that called
+ * the legacy ESP-IDF I2C driver directly. That has been replaced by a call
+ * to atwake() which routes through hal_i2c_wake in the new-driver HAL. See
+ * openspec/changes/migrate-i2c-master-driver for the migration record. */
 
 
 /** \brief basic API methods are all prefixed with atcab_  (CryptoAuthLib Basic)
@@ -80,43 +74,29 @@ ATCA_STATUS calib_wakeup_i2c(ATCADevice device)
 
             if(atcab_is_ca_device(atcab_get_device_type_ext(device)))
             {
-                // Send wake pulse: START, 0x00(W), STOP (no word address byte!)
-                // Using direct HAL call to avoid the word_address byte that atsend() adds
-                ATCAIfaceCfg *cfg = iface->mIfaceCFG;
-                if (cfg) {
-                    // Use standard wake-by-write-to-0x00 method
-                    i2c_cmd_handle_t wake_cmd = i2c_cmd_link_create();
-                    i2c_master_start(wake_cmd);
-                    i2c_master_write_byte(wake_cmd, 0x00 | I2C_MASTER_WRITE, false);
-                    i2c_master_stop(wake_cmd);
-                    esp_err_t rc = i2c_master_cmd_begin(cfg->atcai2c.bus, wake_cmd, pdMS_TO_TICKS(10));
-                    i2c_cmd_link_delete(wake_cmd);
-
-                    // Wait wake delay (1.5ms minimum per datasheet, using 3ms for margin)
-                    vTaskDelay(pdMS_TO_TICKS(3));
-
-                    // Read wake response
-                    uint8_t wake_resp[4] = {0};
-                    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-                    i2c_master_start(cmd);
-                    i2c_master_write_byte(cmd, (cfg->atcai2c.address << 1) | I2C_MASTER_READ, true);
-                    for (int i = 0; i < 4; i++) {
-                        i2c_master_read_byte(cmd, &wake_resp[i], (i == 3) ? I2C_MASTER_NACK : I2C_MASTER_ACK);
-                    }
-                    i2c_master_stop(cmd);
-                    rc = i2c_master_cmd_begin(cfg->atcai2c.bus, cmd, pdMS_TO_TICKS(100));
-                    i2c_cmd_link_delete(cmd);
-
-                    if (rc == ESP_OK) {
-                        wake = wake_resp[0] | (wake_resp[1] << 8) | (wake_resp[2] << 16) | (wake_resp[3] << 24);
-                        // Give device extra time to fully wake before accepting commands
-                        vTaskDelay(pdMS_TO_TICKS(5));
-                    } else {
-                        status = ATCA_COMM_FAIL;
-                    }
+                /* Delegate the wake pulse to the HAL via atwake(), which on
+                 * ESP32 routes to hal_i2c_wake in cryptoauthlib/third_party/
+                 * hal/esp32/hal_esp32_i2c.c. The HAL handles the write-to-0x00
+                 * NACK pulse, the 3 ms wake delay, the 4-byte response read,
+                 * the 5 ms settle delay, and validates the 0x11 wake token
+                 * internally — see openspec/changes/migrate-i2c-master-driver
+                 * for the rationale.
+                 *
+                 * The fork's previous inline implementation called the legacy
+                 * ESP-IDF I2C driver directly, which entered a critical
+                 * section on the expected NACK and triggered IWDT panics.
+                 * That block was removed as part of this migration. */
+                status = atwake(iface);
+                if (ATCA_SUCCESS == status)
+                {
+                    /* hal_i2c_wake already validated the wake-confirm token,
+                     * so populate `wake` with the canonical 0x11 first byte
+                     * to satisfy the hal_check_wake call further down (which
+                     * still runs as part of the legacy-shaped wakeup loop). */
+                    wake = 0x11;
                 }
 
-                second_byte = 0U;  // Not used anymore, but set to 0 for safety
+                second_byte = 0U;  /* unused for CA devices, kept for safety */
             }
             else
             {

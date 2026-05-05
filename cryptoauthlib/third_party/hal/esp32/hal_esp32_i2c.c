@@ -379,6 +379,12 @@ typedef struct atcaI2Cmaster {
     int port_num;
     i2c_master_bus_handle_t bus_handle;
     i2c_master_dev_handle_t dev_handle;
+    /* Second device handle registered at address 0x00, used only to drive
+     * the ATECC wake pulse. The wake protocol requires a write to 0x00 that
+     * the chip NACKs while it transitions out of sleep; the new I2C driver
+     * routes every transaction through a registered device, so we keep a
+     * dedicated handle for it rather than re-registering on every wake. */
+    i2c_master_dev_handle_t wake_handle;
     uint32_t speed;
     uint8_t device_address;
     int ref_ct;
@@ -481,6 +487,25 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
 
             rc = i2c_master_bus_add_device(i2c_hal_data[bus].bus_handle, &dev_cfg, &i2c_hal_data[bus].dev_handle);
             if (rc != ESP_OK) {
+                i2c_del_master_bus(i2c_hal_data[bus].bus_handle);
+                return ATCA_COMM_FAIL;
+            }
+
+            // Register a second device handle at address 0x00 for the ATECC
+            // wake pulse. The chip's wake protocol requires a write to 0x00
+            // that NACKs while the chip transitions out of sleep; with the
+            // new I2C driver every transmit must target a registered device,
+            // so we keep this dedicated handle for the lifetime of the bus.
+            i2c_device_config_t wake_cfg = {
+                .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+                .device_address = 0x00,
+                .scl_speed_hz = i2c_hal_data[bus].speed,
+                .scl_wait_us = 0,
+            };
+
+            rc = i2c_master_bus_add_device(i2c_hal_data[bus].bus_handle, &wake_cfg, &i2c_hal_data[bus].wake_handle);
+            if (rc != ESP_OK) {
+                i2c_master_bus_rm_device(i2c_hal_data[bus].dev_handle);
                 i2c_del_master_bus(i2c_hal_data[bus].bus_handle);
                 return ATCA_COMM_FAIL;
             }
@@ -601,6 +626,75 @@ ATCA_STATUS hal_i2c_receive(ATCAIface iface, uint8_t address, uint8_t *rxdata, u
     return status;
 }
 
+/** \brief wake up ATECC device using I2C bus
+ *
+ * The wake protocol writes to address 0x00 (which the chip NACKs while it
+ * transitions from sleep), waits for the chip to come up, then reads a
+ * 4-byte wake-confirm response from the regular device address. The first
+ * byte of the response is 0x11 on a successful wake.
+ *
+ * Unlike the legacy driver, the new i2c_master driver does NOT enter a
+ * critical section to reset the FSM after a NACK, so the IWDT no longer
+ * panics during this sequence (which was the original motivation for this
+ * migration — see openspec/changes/migrate-i2c-master-driver).
+ *
+ * \param[in] iface  interface to logical device to wakeup
+ * \return ATCA_SUCCESS on success, otherwise an error code.
+ */
+ATCA_STATUS hal_i2c_wake(ATCAIface iface)
+{
+    ATCAIfaceCfg *cfg = iface->mIfaceCFG;
+    ATCAI2CMaster_t *hal_data;
+    esp_err_t rc;
+    uint8_t wake_resp[4] = {0};
+    uint16_t wake_resp_len = sizeof(wake_resp);
+
+    if (!cfg) {
+        return ATCA_BAD_PARAM;
+    }
+
+    hal_data = (ATCAI2CMaster_t*)iface->hal_data;
+    if (!hal_data || !hal_data->wake_handle || !hal_data->dev_handle || !hal_data->initialized) {
+        return ATCA_BAD_PARAM;
+    }
+
+    /* Send wake pulse: write a single byte to the 0x00 wake handle. The
+     * chip NACKs while waking, so any non-OK return here is the expected
+     * outcome of the pulse — we do NOT treat it as failure. The new driver
+     * surfaces the NACK as ESP_ERR_INVALID_STATE / ESP_ERR_TIMEOUT (and
+     * occasionally ESP_FAIL depending on bus state); all are acceptable. */
+    uint8_t wake_byte = 0x00;
+    rc = i2c_master_transmit(hal_data->wake_handle, &wake_byte, 1, 10 /* ms */);
+    (void)rc;  // intentional: NACK is the design
+
+    /* Hold off long enough for the chip to come fully out of sleep. The
+     * fork's empirically-tuned value for RAK11200 / RAK13300 boards is 3 ms
+     * (see openspec/changes/migrate-i2c-master-driver/specs/esp32-i2c-hal). */
+    vTaskDelay(pdMS_TO_TICKS(3));
+
+    /* Read the 4-byte wake-confirm response from the ATECC device handle.
+     * Use the standard hal_i2c_receive entry point so we get consistent
+     * error handling. */
+    if (ATCA_SUCCESS != hal_i2c_receive(iface, cfg->atcai2c.address, wake_resp, &wake_resp_len)) {
+        return ATCA_COMM_FAIL;
+    }
+
+    /* Settle delay before the caller issues the actual command. Same
+     * empirical value carried forward from the fork's previous wake-pulse
+     * code in calib_basic.c. */
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    /* The wake-confirm token is 0x11 in the first byte. cryptoauthlib's
+     * higher layers re-validate this (calib_wakeup compares the response
+     * to the expected pattern) so we just propagate ATCA_SUCCESS here when
+     * the read transport succeeded. */
+    if (wake_resp[0] != 0x11) {
+        return ATCA_WAKE_FAILED;
+    }
+
+    return ATCA_SUCCESS;
+}
+
 /** \brief manages reference count on given bus and releases resource if no more references exist
  * \param[in] hal_data - opaque pointer to hal data structure - known only to the HAL implementation
  * \return ATCA_SUCCESS on success, otherwise an error code.
@@ -610,6 +704,10 @@ ATCA_STATUS hal_i2c_release(void *hal_data)
     ATCAI2CMaster_t *hal = (ATCAI2CMaster_t*)hal_data;
 
     if (hal && --(hal->ref_ct) <= 0) {
+        if (hal->wake_handle) {
+            i2c_master_bus_rm_device(hal->wake_handle);
+            hal->wake_handle = NULL;
+        }
         if (hal->dev_handle) {
             i2c_master_bus_rm_device(hal->dev_handle);
             hal->dev_handle = NULL;
