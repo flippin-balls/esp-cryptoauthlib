@@ -19,6 +19,8 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "cryptoauthlib.h"
 #include "esp_idf_version.h"
 
