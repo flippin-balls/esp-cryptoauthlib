@@ -361,9 +361,18 @@ ATCA_STATUS hal_i2c_control(ATCAIface iface, uint8_t option, void* param, size_t
     (void)paramlen;
 
     if (iface && iface->mIfaceCFG) {
-        if (ATCA_HAL_CHANGE_BAUD == option) {
+        switch (option) {
+        case ATCA_HAL_CONTROL_WAKE:
+            /* atwake() in atca_iface.c routes here via halcontrol.
+             * Without this case, wake returns ATCA_UNIMPLEMENTED and the
+             * chip is never actually pulsed. */
+            return hal_i2c_wake(iface);
+        case ATCA_HAL_CHANGE_BAUD:
             return hal_i2c_change_baud(iface, *(uint32_t*)param);
-        } else {
+        case ATCA_HAL_CONTROL_SELECT:
+        case ATCA_HAL_CONTROL_DESELECT:
+            return ATCA_SUCCESS;
+        default:
             return ATCA_UNIMPLEMENTED;
         }
     }
@@ -733,9 +742,18 @@ ATCA_STATUS hal_i2c_control(ATCAIface iface, uint8_t option, void* param, size_t
     (void)paramlen;
 
     if (iface && iface->mIfaceCFG) {
-        if (ATCA_HAL_CHANGE_BAUD == option) {
+        switch (option) {
+        case ATCA_HAL_CONTROL_WAKE:
+            /* atwake() in atca_iface.c routes here via halcontrol.
+             * Without this case, wake returns ATCA_UNIMPLEMENTED and the
+             * chip is never actually pulsed. */
+            return hal_i2c_wake(iface);
+        case ATCA_HAL_CHANGE_BAUD:
             return hal_i2c_change_baud(iface, *(uint32_t*)param);
-        } else {
+        case ATCA_HAL_CONTROL_SELECT:
+        case ATCA_HAL_CONTROL_DESELECT:
+            return ATCA_SUCCESS;
+        default:
             return ATCA_UNIMPLEMENTED;
         }
     }
