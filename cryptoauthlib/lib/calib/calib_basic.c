@@ -89,11 +89,11 @@ ATCA_STATUS calib_wakeup_i2c(ATCADevice device)
                 status = atwake(iface);
                 if (ATCA_SUCCESS == status)
                 {
-                    /* hal_i2c_wake already validated the wake-confirm token,
-                     * so populate `wake` with the canonical 0x11 first byte
-                     * to satisfy the hal_check_wake call further down (which
-                     * still runs as part of the legacy-shaped wakeup loop). */
-                    wake = 0x11;
+                    /* hal_i2c_wake already validated the canonical wake
+                     * response. Populate `wake` (uint32_t) with the same
+                     * bytes [0x04, 0x11, 0x33, 0x43] in little-endian so
+                     * the hal_check_wake call below also passes. */
+                    wake = 0x43331104u;
                 }
 
                 second_byte = 0U;  /* unused for CA devices, kept for safety */

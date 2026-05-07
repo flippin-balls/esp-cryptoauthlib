@@ -697,15 +697,11 @@ ATCA_STATUS hal_i2c_wake(ATCAIface iface)
     /* Settle delay before the caller issues the actual command. */
     esp_rom_delay_us(5000);
 
-    /* The wake-confirm token is 0x11 in the first byte. cryptoauthlib's
-     * higher layers re-validate this (calib_wakeup compares the response
-     * to the expected pattern) so we just propagate ATCA_SUCCESS here when
-     * the read transport succeeded. */
-    if (wake_resp[0] != 0x11) {
-        return ATCA_WAKE_FAILED;
-    }
-
-    return ATCA_SUCCESS;
+    /* Validate the canonical 4-byte wake response: {0x04, 0x11, 0x33, 0x43}
+     * (count=4, status=0x11 "after-wake", CRC). hal_check_wake performs
+     * the exact comparison cryptoauthlib expects, including the
+     * self-test-failure response variant. */
+    return hal_check_wake(wake_resp, (int)wake_resp_len);
 }
 
 /** \brief manages reference count on given bus and releases resource if no more references exist
