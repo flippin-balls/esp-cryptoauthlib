@@ -19,8 +19,7 @@
 
 #include "esp_err.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_rom_sys.h"
 #include "cryptoauthlib.h"
 #include "esp_idf_version.h"
 
@@ -669,10 +668,10 @@ ATCA_STATUS hal_i2c_wake(ATCAIface iface)
     rc = i2c_master_transmit(hal_data->wake_handle, &wake_byte, 1, 10 /* ms */);
     (void)rc;  // intentional: NACK is the design
 
-    /* Hold off long enough for the chip to come fully out of sleep. The
-     * fork's empirically-tuned value for RAK11200 / RAK13300 boards is 3 ms
-     * (see openspec/changes/migrate-i2c-master-driver/specs/esp32-i2c-hal). */
-    vTaskDelay(pdMS_TO_TICKS(3));
+    /* Hold off long enough for the chip to come fully out of sleep.
+     * Use esp_rom_delay_us (busy-wait) because pdMS_TO_TICKS(3) rounds
+     * to 0 at the default 100 Hz tick rate, making vTaskDelay a no-op. */
+    esp_rom_delay_us(3000);
 
     /* Read the 4-byte wake-confirm response from the ATECC device handle.
      * Use the standard hal_i2c_receive entry point so we get consistent
@@ -681,10 +680,8 @@ ATCA_STATUS hal_i2c_wake(ATCAIface iface)
         return ATCA_COMM_FAIL;
     }
 
-    /* Settle delay before the caller issues the actual command. Same
-     * empirical value carried forward from the fork's previous wake-pulse
-     * code in calib_basic.c. */
-    vTaskDelay(pdMS_TO_TICKS(5));
+    /* Settle delay before the caller issues the actual command. */
+    esp_rom_delay_us(5000);
 
     /* The wake-confirm token is 0x11 in the first byte. cryptoauthlib's
      * higher layers re-validate this (calib_wakeup compares the response
