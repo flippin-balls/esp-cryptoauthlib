@@ -480,11 +480,16 @@ ATCA_STATUS hal_i2c_init(ATCAIface iface, ATCAIfaceCfg *cfg)
                 return ATCA_COMM_FAIL;
             }
 
-            // Get device address
+            // Get device address. Per the legacy hal_i2c_send convention in
+            // this file (line 204), atcai2c.address is stored in 7-bit form
+            // (e.g. 0x60 for ATECC608A). The new i2c_master driver also
+            // expects 7-bit, so use the value directly without shifting.
+            // (Shifting >> 1 here would give 0x30 — a different device
+            // entirely — and the chip would never ACK.)
 #ifdef ATCA_ENABLE_DEPRECATED
-            i2c_hal_data[bus].device_address = ATCA_IFACECFG_VALUE(cfg, atcai2c.slave_address) >> 1;
+            i2c_hal_data[bus].device_address = ATCA_IFACECFG_VALUE(cfg, atcai2c.slave_address);
 #else
-            i2c_hal_data[bus].device_address = ATCA_IFACECFG_VALUE(cfg, atcai2c.address) >> 1;
+            i2c_hal_data[bus].device_address = ATCA_IFACECFG_VALUE(cfg, atcai2c.address);
 #endif
 
             // Configure I2C device
