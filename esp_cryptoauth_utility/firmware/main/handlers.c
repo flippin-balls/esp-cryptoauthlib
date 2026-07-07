@@ -118,8 +118,16 @@ esp_err_t init_atecc608_device(char *device_type)
     esp_log_level_t original_level = esp_log_level_get("i2c.master");
     esp_log_level_set("i2c.master", ESP_LOG_NONE);
 
-    // Try TrustCustom (0xC0) - most common for blank chips
-    cfg_ateccx08a_i2c_default.atcai2c.address = 0xC0;
+    // Addresses are the 7-BIT form: this fork's HAL stores atcai2c.address as
+    // 7-bit and derives the bus byte itself (legacy driver shifts LEFT at send;
+    // the i2c_master driver uses it raw — see commit 0266483). The old 8-bit
+    // values (0xC0/0x6A/0x6C) shifted out of range and made EVERY ATECC op fail
+    // with ATCA_COMM_FAIL (-16) on both drivers — this is why utility builds
+    // from this branch could not talk to RAK hardware while device firmware
+    // (which passes CONFIG_ATCA_I2C_ADDRESS=0x60) worked fine.
+
+    // Try TrustCustom (7-bit 0x60, bus byte 0xC0) - most common for blank chips
+    cfg_ateccx08a_i2c_default.atcai2c.address = 0x60;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
         esp_log_level_set("i2c.master", original_level);
@@ -128,8 +136,8 @@ esp_err_t init_atecc608_device(char *device_type)
         return ESP_OK;
     }
 
-    // Try Trust&Go (0x6A)
-    cfg_ateccx08a_i2c_default.atcai2c.address = 0x6A;
+    // Try Trust&Go (7-bit 0x35, bus byte 0x6A)
+    cfg_ateccx08a_i2c_default.atcai2c.address = 0x35;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
         esp_log_level_set("i2c.master", original_level);
@@ -138,8 +146,8 @@ esp_err_t init_atecc608_device(char *device_type)
         return ESP_OK;
     }
 
-    // Try TrustFlex (0x6C)
-    cfg_ateccx08a_i2c_default.atcai2c.address = 0x6C;
+    // Try TrustFlex (7-bit 0x36, bus byte 0x6C)
+    cfg_ateccx08a_i2c_default.atcai2c.address = 0x36;
     ret = atcab_init(&cfg_ateccx08a_i2c_default);
     if (ret == ATCA_SUCCESS) {
         esp_log_level_set("i2c.master", original_level);
