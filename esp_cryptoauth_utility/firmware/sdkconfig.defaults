@@ -1,3 +1,11 @@
+# RAK3112/RAK5814 hardware requires the LEGACY I2C driver for the ATECC608A: on
+# IDF >=5.2 the library defaults to the new i2c_master driver, which fails EVERY
+# ATECC op on RAK hardware with comms error -16 (verified on-bench 2026-07-07 —
+# init, print-chip-info, read-config, write-enc-data all fail; the deployed
+# working factory bin uses the legacy driver). Without this line a default build
+# of this utility silently bricks provisioning on the shipping fleet hardware.
+CONFIG_ATCA_I2C_USE_LEGACY_DRIVER=y
+
 CONFIG_ESP_TASK_WDT=n
 CONFIG_ESPTOOLPY_FLASHSIZE_2MB=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
