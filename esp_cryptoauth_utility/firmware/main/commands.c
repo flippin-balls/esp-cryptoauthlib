@@ -776,6 +776,34 @@ static esp_err_t read_config(int argc, char **argv)
         }
 
         printf("\n================================================================================\n");
+
+        // Lock + individual-slot-lock status (config bytes 86-89). The per-slot
+        // decode above does NOT show these, but they decide whether a slot is
+        // writable at all: LockValue(86)/LockConfig(87) are the zone locks
+        // (0x55 = UNLOCKED, else LOCKED); SlotLocked (88-89, little-endian) has
+        // one bit per slot, and a CLEARED bit means that slot is individually
+        // locked (no further writes) — the exact thing an "io_key is right but
+        // the encrypted write is still rejected" investigation needs. Emitted as
+        // stable KEY=VALUE lines so a host diagnostic can parse them.
+        uint8_t lock_value  = config_buf[86];
+        uint8_t lock_config = config_buf[87];
+        uint16_t slot_locked = config_buf[88] | (config_buf[89] << 8);
+        printf("LockValue=0x%02X (%s)\n", lock_value,
+               lock_value == 0x55 ? "UNLOCKED" : "LOCKED");
+        printf("LockConfig=0x%02X (%s)\n", lock_config,
+               lock_config == 0x55 ? "UNLOCKED" : "LOCKED");
+        printf("SlotLocked=0x%04X\n", slot_locked);
+        for (int slot = 0; slot < 16; slot++) {
+            printf("SlotLocked[%d]=%d\n", slot, (slot_locked >> slot) & 1);
+        }
+
+        // Raw 128-byte config zone (readable even on a locked chip) so a host
+        // diagnostic can diff two devices byte-for-byte without re-deriving.
+        printf("RawConfig=");
+        for (int i = 0; i < 128; i++) {
+            printf("%02X", config_buf[i]);
+        }
+        printf("\n================================================================================\n");
     }
 
     fflush(stdout);
