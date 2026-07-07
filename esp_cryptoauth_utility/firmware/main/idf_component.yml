@@ -3,4 +3,10 @@ dependencies:
   ## Required IDF version
   idf:
     version: '>=4.1.0'
-  espressif/esp-cryptoauthlib: '*'
+  ## Use THIS repo (the flippin-balls fork, with the ATECC I2C fixes) as the
+  ## library, not the upstream registry component. Same pattern upstream later
+  ## adopted. Without override_path the utility firmware silently links the
+  ## un-fixed registry library.
+  esp-cryptoauthlib:
+    version: "*"
+    override_path: "../../../"
