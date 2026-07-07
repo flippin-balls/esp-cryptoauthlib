@@ -937,7 +937,12 @@ static esp_err_t write_enc_data(int argc, char **argv)
 
 	ESP_LOGI(TAG, "Status: %s\n", ret ? "Failure" : "Success");
     fflush(stdout);
-    return ESP_OK;
+    // Return the ACTUAL write result, not an unconditional ESP_OK. A failed encrypted
+    // slot-7 write (e.g. stale/wrong slot-6 io_key) previously reported success to any
+    // caller that trusted the return code; the CLI had to scrape the "Status:" text line
+    // to notice. Keep that line (the CLI still parses it) AND make the return honest so a
+    // K_loc write failure can't silently orphan a device. (err_code holds the ATCA detail.)
+    return (ret == 0) ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t register_write_enc_data()
