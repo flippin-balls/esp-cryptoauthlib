@@ -679,7 +679,15 @@ ATCA_STATUS hal_i2c_wake(ATCAIface iface)
      * surfaces the NACK as ESP_ERR_INVALID_STATE / ESP_ERR_TIMEOUT (and
      * occasionally ESP_FAIL depending on bus state); all are acceptable. */
     uint8_t wake_byte = 0x00;
+    /* The new i2c.master driver logs this EXPECTED wake NACK at ESP_LOGE("i2c.master", ...),
+     * which floods the console (~one burst per ATECC op) and buries real faults. Silence the
+     * driver tag ONLY across the deliberate wake pulse, then restore ESP_LOG_ERROR so a NACK on
+     * a REAL transaction (hal_i2c_send/receive — the failures we actually care about) still logs.
+     * Safe: the ATECC owns a dedicated I2C bus (SDA=9/SCL=40) and cryptoauthlib serializes ops
+     * under the HAL mutex, so nothing else races in this ~microsecond window. */
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
     rc = i2c_master_transmit(hal_data->wake_handle, &wake_byte, 1, 10 /* ms */);
+    esp_log_level_set("i2c.master", ESP_LOG_ERROR);
     (void)rc;  // intentional: NACK is the design
 
     /* Hold off long enough for the chip to come fully out of sleep.
