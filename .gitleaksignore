@@ -1,0 +1,44 @@
+# gitleaks baseline -- pre-existing findings, 2026-09-08.
+#
+# WHAT THIS FILE DOES: stops the listed findings from failing `secret-scan`, so
+# the gate can be added to a repo whose history already contains them.
+#
+# WHAT IT DOES NOT DO -- read this before trusting it:
+#   - It rotates NOTHING. Nothing here has been rotated, revoked or re-issued.
+#   - It removes nothing from git history. Every entry is still in the repo.
+#   - It does not certify anything as fake. Entries are SHAPE-MATCHED by
+#     gitleaks and assessed by path and context only. Liveness was NOT verified,
+#     and could not be: confirming it means printing the value or presenting it
+#     to an issuer.
+#
+# A fingerprint is commit:file:rule:line. No secret value is stored here, and
+# each pins one exact known occurrence -- a NEW secret still fails the scan.
+#
+# WARNING: fingerprints are keyed to a COMMIT. Redacting or rewriting a flagged
+# file creates a SECOND finding for the same content and re-breaks the gate. If
+# you clean one of these up, expect to baseline the new fingerprint too.
+#
+# 7 findings: generic-api-key=5, private-key=2
+#
+# ASSESSMENT: this repo is a VENDORED copy of Espressif's esp-cryptoauthlib. All 7
+# findings are upstream content: cryptoauthlib/lib/pkcs11/pkcs11_key.c (4),
+# I2C_NACK_DIAGNOSIS.md (1), and the two sample signing keys under
+# esp_cryptoauth_utility/sample_certs/, which the vendor publishes as samples.
+# Not verified byte-for-byte against upstream.
+# 
+# Note this repo is on the minion exclusion list ("vendored crypto"). This change adds
+# a CI workflow and a baseline file only -- no vendored code is touched.
+#
+# By file:
+#     4  cryptoauthlib/lib/pkcs11/pkcs11_key.c
+#     1  I2C_NACK_DIAGNOSIS.md
+#     1  esp_cryptoauth_utility/sample_certs/sample_root_ca_key.pem
+#     1  esp_cryptoauth_utility/sample_certs/sample_signer_key.pem
+
+448fd012740c505fbd151b4717143189b7283f2c:cryptoauthlib/lib/pkcs11/pkcs11_key.c:generic-api-key:275
+448fd012740c505fbd151b4717143189b7283f2c:cryptoauthlib/lib/pkcs11/pkcs11_key.c:generic-api-key:279
+448fd012740c505fbd151b4717143189b7283f2c:cryptoauthlib/lib/pkcs11/pkcs11_key.c:generic-api-key:283
+448fd012740c505fbd151b4717143189b7283f2c:cryptoauthlib/lib/pkcs11/pkcs11_key.c:generic-api-key:287
+86cb7c864170e3a2195eb667f58156519754a73d:esp_cryptoauth_utility/sample_certs/sample_signer_key.pem:private-key:4
+aeb4aeddeeb86d00bc682128f0a077239b051fda:esp_cryptoauth_utility/sample_certs/sample_root_ca_key.pem:private-key:1
+fafc62ef78e96bc5343e0b8be64471ce567dfdd5:I2C_NACK_DIAGNOSIS.md:generic-api-key:164
